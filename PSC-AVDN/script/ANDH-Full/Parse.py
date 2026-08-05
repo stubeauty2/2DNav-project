@@ -20,15 +20,15 @@ from env import ANDHNavBatch
 
 import pandas as pd
 
-CFGPU_URL = ""
-CFGPU_MODEL = ""
+CFGPU_URL = "https://api.deepseek.com/chat/completions"
+CFGPU_MODEL = "deepseek-v4-flash"
 CFGPU_API_TOKEN = os.getenv("API_TOKEN", "")
 
-ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
-DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
-SPLIT = "test_unseen_full"
-PRED_DIR = str(PROJECT_ROOT / "preds_out")
-MAX_STEPS = 8
+ANNO_DIR     = str(PROJECT_ROOT / "datasets" / "FULL")
+DATASET_DIR  = str(PROJECT_ROOT / "datasets" / "AVDN")
+SPLIT        = "test_unseen_full"
+PRED_DIR     = str(PROJECT_ROOT / "preds_out_full")
+MAX_STEPS    = 8
 SCALE_FACTOR = 3.0
 
 _SINGLE_STEP_SYSTEM_PROMPT = (
@@ -434,7 +434,8 @@ CLOCK_MAP = {
     315: "10:30",
 }
 DEGREE_MARK = re.compile(r"^(\d+)\s*°$")
-CLOCK_MARK  = re.compile(r"^\s*(\d{1,2})(?::\d{1,2})?\s*$", re.I)
+# Keep the CLOCK_MARK definition above.  Redefining it here without a
+# capturing group for minutes makes clock_to_angle_deg(m.group(2)) fail.
 
 def degree_to_clock(angle: float) -> str:
     a = float(angle) % 360.0

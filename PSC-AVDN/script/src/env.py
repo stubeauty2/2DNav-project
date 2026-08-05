@@ -82,7 +82,12 @@ class ANDHNavBatch(torch.utils.data.IterableDataset):
         self.dataset_dir = dataset_dir
         self.data = []
         for split in splits:
-            new_data = json.load(open(os.path.join(anno_dir, "%s_data.json" % split)))
+            with open(
+                os.path.join(anno_dir, "%s_data.json" % split),
+                "r",
+                encoding="utf-8",
+            ) as f:
+                new_data = json.load(f)
             if full_traj == False:
                 for item in new_data:
                     item["angle"] = round(item["angle"]) % 360

@@ -20,8 +20,8 @@ sys.path.append(str(PROJECT_ROOT / "src"))
 
 from env import ANDHNavBatch
 
-CFGPU_URL   = ""
-CFGPU_MODEL = ""
+CFGPU_URL   = "https://api.deepseek.com/chat/completions"
+CFGPU_MODEL = "deepseek-v4-flash"
 CFGPU_API_TOKEN = os.getenv("API_TOKEN", "")   
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "AVDN" / "annotations")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")

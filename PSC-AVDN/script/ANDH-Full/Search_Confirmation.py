@@ -35,19 +35,19 @@ from util import (
     data_url_from_image_array
 )
 
-RESULTS_CSV = str(PROJECT_ROOT / "preds_out" / "parsing_results_full.csv")
+RESULTS_CSV = str(PROJECT_ROOT / "preds_out_full" / "parsing_results_full.csv")
 
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
-SPLIT       = "val_seen_full"
+SPLIT       = "test_unseen_full"
 PRED_DIR = str(PROJECT_ROOT / "preds" / "andh_full")
 OUT_DIR     = os.path.join(PRED_DIR, "search_output")
 SCALE_FACTOR       = 5
 FIXED_CROP_SIDE    = 768
 
 DEFAULT_API_KEY = os.getenv("API_KEY", "")
-QWEN_URL        = ""
-QWEN_MODEL      = ""
+QWEN_URL        = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+QWEN_MODEL      = "qwen-vl-max"
 
 def _haversine_m(lat1, lng1, lat2, lng2):
     R = 6371000.0
