@@ -9,7 +9,10 @@ import math
 import os
 import re
 import sys
-import cv2
+try:
+    import cv2
+except ImportError:  # allow non-visual parser/planner tests to import this module
+    cv2 = None
 import numpy as np
 import requests
 
@@ -17,7 +20,22 @@ sys.path.append(str(SCRIPT_ROOT / "src"))
 DEFAULT_API_KEY = os.getenv("QWEN_API_KEY", "")
 QWEN_URL = "https://www.cfgpu.com/userapi/v1/model/v1/chat/completions"
 QWEN_MODEL = "qwen-vl-max-2025-01-25"
-from env import compute_iou
+try:
+    from env import compute_iou
+except ImportError:
+    # Utility-only imports (including parser/search unit tests) should not pull
+    # in torch through env.py.  OpenCV provides a sufficient convex-polygon IoU
+    # fallback; dataset execution still imports the real environment lazily.
+    def compute_iou(a, b):
+        if cv2 is None:
+            raise RuntimeError("compute_iou requires either the project env or OpenCV")
+        poly1 = cv2.convexHull(np.asarray(a, dtype=np.float32))
+        poly2 = cv2.convexHull(np.asarray(b, dtype=np.float32))
+        area1 = float(cv2.contourArea(poly1))
+        area2 = float(cv2.contourArea(poly2))
+        inter_area, _ = cv2.intersectConvexConvex(poly1, poly2)
+        union_area = area1 + area2 - float(inter_area)
+        return float(inter_area) / union_area if union_area > 0.0 else 0.0
 
 
 def _corners_center(corners):
@@ -63,6 +81,15 @@ def clock_to_angle_deg(clock_str):
 def generate_view_corners_with_scale(
     center_point, ob, scale_factor=1.0, angle_deg=None
 ):
+    """Return a metric-stable view quadrilateral around ``center_point``.
+
+    ``angle_deg`` is clockwise from north.  The old implementation rotated
+    latitude/longitude degree deltas directly.  Longitude degrees are not the
+    same physical length as latitude degrees, so that made a view change its
+    physical shape when it was rotated (and the error grew with latitude).
+    Build and rotate the rectangle in a local north/east metric frame first,
+    then convert it back to geographic coordinates.
+    """
     center_point = np.array(center_point, dtype=float).reshape(2,)
     lat_min, lng_min = ob["gps_botm_left"]
     lat_max, lng_max = ob["gps_top_right"]
@@ -70,32 +97,33 @@ def generate_view_corners_with_scale(
     lat_per_px = (lat_max - lat_min) / h
     lng_per_px = (lng_max - lng_min) / w
     base_pixels = 224 * float(scale_factor)
-    half_lat = (base_pixels / 2) * lat_per_px
-    half_lng = (base_pixels / 2) * lng_per_px
-    if angle_deg is None:
-        return np.array(
-            [
-                [center_point[0] + half_lat, center_point[1] - half_lng],
-                [center_point[0] + half_lat, center_point[1] + half_lng],
-                [center_point[0] - half_lat, center_point[1] + half_lng],
-                [center_point[0] - half_lat, center_point[1] - half_lng],
-            ],
-            dtype=float,
-        )
-    theta = np.radians(float(angle_deg))
-    cos_t, sin_t = np.cos(theta), np.sin(theta)
-    local = np.array(
+    meters_per_lat_degree = 111_320.0
+    cos_lat = max(1e-6, abs(np.cos(np.radians(float(center_point[0])))))
+    meters_per_lng_degree = meters_per_lat_degree * cos_lat
+    half_forward_m = (base_pixels / 2.0) * abs(lat_per_px) * meters_per_lat_degree
+    half_lateral_m = (base_pixels / 2.0) * abs(lng_per_px) * meters_per_lng_degree
+
+    # Local coordinates are [forward/north, right/east].
+    local_m = np.array(
         [
-            [+half_lat, -half_lng],
-            [+half_lat, +half_lng],
-            [-half_lat, +half_lng],
-            [-half_lat, -half_lng],
+            [+half_forward_m, -half_lateral_m],
+            [+half_forward_m, +half_lateral_m],
+            [-half_forward_m, +half_lateral_m],
+            [-half_forward_m, -half_lateral_m],
         ],
         dtype=float,
     )
-    R = np.array([[cos_t, -sin_t], [sin_t, cos_t]], dtype=float)
-    rot = local @ R.T
-    return rot + center_point
+    theta = np.radians(float(angle_deg or 0.0))
+    cos_t, sin_t = np.cos(theta), np.sin(theta)
+    forward = local_m[:, 0]
+    right = local_m[:, 1]
+    north_m = forward * cos_t - right * sin_t
+    east_m = forward * sin_t + right * cos_t
+    corners = np.column_stack([
+        center_point[0] + north_m / meters_per_lat_degree,
+        center_point[1] + east_m / meters_per_lng_degree,
+    ])
+    return corners.astype(float)
 
 
 def create_view_image(view_corners, ob, save_path=None, out_px=768):
@@ -119,8 +147,11 @@ def create_view_image(view_corners, ob, save_path=None, out_px=768):
             y = (lat_max - lat) / (lat_max - lat_min) * h
             src.append([x, y])
         src = np.array(src, dtype=np.float32)
-        src[:, 0] = np.clip(src[:, 0], 0, w - 1)
-        src[:, 1] = np.clip(src[:, 1], 0, h - 1)
+        # Do not clip out-of-map corners.  Clipping each source corner and then
+        # stretching that distorted quadrilateral to the full output image
+        # breaks the crop-to-geographic transform used by Search_Confirmation.
+        # OpenCV samples out-of-bounds pixels with a constant border, preserving
+        # both the requested egocentric geometry and an honest unknown region.
         if cv2.contourArea(src.astype(np.float32)) < 1.0:
             print("[WARN] View area is too small")
             return None

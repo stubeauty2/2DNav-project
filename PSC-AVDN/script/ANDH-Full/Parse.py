@@ -1,271 +1,363 @@
-import os
-import sys
-import re
+"""Parse complete ANDH dialogs into a flat ``InstructionPlan``.
+
+The language model emits two lists only: entities and ordered events.  This
+module performs tolerant structural normalization and at most one repair for
+malformed output.  It deliberately has no rule-based semantic parser and no
+second-model reviewer.
+"""
+
+from __future__ import annotations
+
 import csv
 import json
-import base64
+import os
+import re
+import sys
+import time
 from pathlib import Path
-from typing import Iterable, Tuple, List
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import numpy as np
-import cv2
 import requests
-from tqdm import tqdm
-from torch.utils.data import DataLoader
 
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.append(str(PROJECT_ROOT / "src"))
+for import_path in (SCRIPT_DIR, PROJECT_ROOT / "src"):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
-from env import ANDHNavBatch
-
-import pandas as pd
-
-CFGPU_URL = "https://api.deepseek.com/chat/completions"
-CFGPU_MODEL = "deepseek-v4-flash"
-CFGPU_API_TOKEN = os.getenv("API_TOKEN", "")
-
-ANNO_DIR     = str(PROJECT_ROOT / "datasets" / "FULL")
-DATASET_DIR  = str(PROJECT_ROOT / "datasets" / "AVDN")
-SPLIT        = "test_unseen_full"
-PRED_DIR     = str(PROJECT_ROOT / "preds_out_full")
-MAX_STEPS    = 8
-SCALE_FACTOR = 3.0
-
-_SINGLE_STEP_SYSTEM_PROMPT = (
-    "You are an expert in drone navigation command analysis. Please structurally understand and break down the received instructions, and output standardized results."
-    "Only output two conclusions, do not explain or output the thought process:"
-    "Next movement direction (if based on landmarks, output Land here): (clock direction or Land)  Destination description:"
-    "[General Principles]"
-    "1) Only use the [INS] (instruction) in the user message as the basis. Initial orientation is assumed to be 12:00."
-    "2) Direction source discrimination: If based on the drone (e.g., your 3 o'clock / ahead / behind / left / turn left then go forward), output clock direction;"
-    "If based on landmarks (e.g., the northeastern part of the landfill / south side of the stadium / west of the bridge), output Land."
-    "If neither based on landmarks nor the drone, but only standalone absolute directions (e.g., north/east/south/west/northeast/southwest/southeast/northwest, etc.), output the corresponding degrees (N=0°, NE=45°, E=90°, SE=135°, S=180°, SW=225°, W=270°, NW=315°)"
-    "3) Next movement direction = the 'synthesized heading' after completing necessary turns, just before starting to move, not breaking turns into multiple steps, nor the static direction of the destination relative to the drone."
-    "4) Error tolerance: Recognize non-standard spellings (oclock/o' clock/o clok, forword, lef, etc.), colloquial and grammatical defects."
-    "5) Minimum clock granularity: 15° (supports 1:15, 3:30, 4:45, etc.)."
-    "6) Output a brief destination description (landmark + specific part/building, etc.)."
-    "7) When a sentence contains both 'relative to the drone' and 'relative to landmarks', first determine if it is landmark-based (e.g., 'the <direction> of the <landmark>'), if yes output Land; only when definitely based on the drone as reference, output clock direction."
-    "8) Sequential synthesis rule (core): Find the most recent verb that causes 'movement' (head/go/move/proceed/fly/continue);"
-    "Synthesize the previous turning/adjustment verbs (turn/rotate/pivot/backwards/clockwise/counterclockwise, etc.) in sequence into a final heading,"
-    "This final heading is the 'next movement direction'."
-    "9) Conversational reference: If [INS] is a follow-up sentence in a dialogue, incorporate contextual phrases (e.g., the last building there)."
-    "10) Clock mapping reference: N=12:00; NE=1:30; E=3:00; SE=4:30; S=6:00; SW=7:30; W=9:00; NW=10:30;"
-    "slight left/right≈±15°; sharp left/right≈±90°; back/behind/turn backwards=+180°; other slight turn instructions can also output +/-15°"
-    "11) If unable to determine a clear movement heading but can confirm it is landmark-based, output Land for direction; if neither landmarks nor a determinable heading, conservatively output 12:00."
-    "12) right in front of you / right ahead / straight ahead / just ahead / in front of you / ahead → 12:00 (here right is for emphasis, not indicating right side)."
-    "13) Destination description should be in full English and may include waypoint information as reference; if the destination is described based on waypoints or reference objects, need a complete description for subsequent visual positioning."
-    "14) If there is no specific destination description, or it is judged that the current location is the destination, directly output 'destination' for the 'Destination description' field."
-    "[Strictly follow the output format, no other formats allowed: fixed, only one line, strictly prohibit outputting any other text]"
-    "Next movement direction: <direction>  Destination description: <brief description or destination>"
+from instruction_schema import (  # noqa: E402
+    FORMAT_VERSION,
+    InstructionPlan,
+    event_summary_rows,
+    normalize_instruction_plan,
 )
 
-def analyze_instruction_with_prompt(
-    instruction: str,
-    model: str = CFGPU_MODEL,
-    api_token: str = CFGPU_API_TOKEN,
-    base_url: str = CFGPU_URL,
+
+MODEL_URL = os.getenv(
+    "PARSER_MODEL_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+)
+MODEL_NAME = os.getenv("PARSER_MODEL_NAME", "qwen3.6-max-preview")
+MODEL_API_TOKEN = os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
+MODEL_CONNECT_TIMEOUT = float(os.getenv("PARSER_CONNECT_TIMEOUT", "20"))
+MODEL_READ_TIMEOUT = float(os.getenv("PARSER_READ_TIMEOUT", "180"))
+
+ANNO_DIR = PROJECT_ROOT / "datasets" / "sample2"
+DATASET_DIR = PROJECT_ROOT / "datasets" / "sample2"
+SPLIT = "test_unseen_full"
+PRED_DIR = PROJECT_ROOT / "out" / "preds_out_full_sample2"
+MAX_DIALOGS = int(os.getenv("PARSER_MAX_DIALOGS", "0"))
+
+TAG_RE = re.compile(r"\[(INS|QUE)\]", re.IGNORECASE)
+
+
+SYSTEM_PROMPT = """
+You parse a complete multi-turn aerial-navigation dialog. Return one JSON
+object with exactly two top-level keys: entities and events. Do not return
+markdown or explanations.
+
+entities is a list. Each entity has:
+- id: short stable identifier
+- description: visual description known when the entity is first introduced;
+  put later details in chronological UPDATE_ENTITY events
+- kind: LANDMARK, REGION, CORRIDOR, or BOUNDARY
+- goal: true only for the final destination
+
+events is one chronological list extracted from INS turns only. Keep the
+original dialogue turn number, so event turns may be 1, 3, 5, etc. Each event
+has type and turn. Navigation types are MOVE, TURN, REACH, STOP_AT,
+PASS, APPROACH, CROSS, GO_THROUGH, ENTER, EXIT, FOLLOW, AVOID. Dialogue types
+are UPDATE_ENTITY and PROGRESS.
+
+Optional event fields:
+- entity: entity id, or a concrete description when no id was declared
+- direction: {"frame":"absolute|relative", "angle": number}
+- mode: FORWARD or BACKWARD
+- count, side
+- ref and completed for PROGRESS; ref is the 1-based index of an earlier event
+- description for UPDATE_ENTITY
+
+QUE turns are context only for understanding the following INS answer. Never
+emit an event from a QUE turn, never output QUERY, and never extract entities,
+progress claims, observations, or movements solely from QUE text.
+
+Angles are clockwise degrees. Absolute 0 is north, 90 east, 180 south and 270
+west. Relative 0 is forward; clock bearings are relative (12=0, 3=90, 6=180,
+7=210, 9=270). Preserve the stated event order. A direction remains active
+until a later event changes it, so it need not be repeated. Use PROGRESS only
+when an INS turn explicitly states that an earlier event has already happened;
+visibility or proximity alone is completed=false. Later descriptions from INS
+turns use UPDATE_ENTITY. The final destination
+must be goal=true and must have a REACH event. Do not invent
+segments, motion policies, geometry, source spans, predicates or event ids.
+
+Example 1 input:
+1 INS: Go southwest at seven o'clock to the large blue-roof building.
+Example 1 output:
+{"entities":[{"id":"goal","description":"large blue-roof building","kind":"LANDMARK","goal":true}],"events":[{"type":"REACH","turn":1,"entity":"goal","direction":{"frame":"relative","angle":210}}]}
+
+Example 2 input:
+1 INS: Fly north, cross two roads and pass the parking lot.
+2 QUE: I crossed the roads. What does the destination look like?
+3 INS: It is the yellow warehouse. Continue east until you reach it.
+Example 2 output:
+{"entities":[{"id":"roads","description":"roads","kind":"BOUNDARY","goal":false},{"id":"parking","description":"parking lot","kind":"REGION","goal":false},{"id":"goal","description":"destination","kind":"LANDMARK","goal":true}],"events":[{"type":"CROSS","turn":1,"entity":"roads","direction":{"frame":"absolute","angle":0},"count":2},{"type":"PASS","turn":1,"entity":"parking"},{"type":"UPDATE_ENTITY","turn":3,"entity":"goal","description":"yellow warehouse"},{"type":"REACH","turn":3,"entity":"goal","direction":{"frame":"absolute","angle":90}}]}
+""".strip()
+
+
+def parse_tagged_turns(dialog: str) -> List[Dict[str, Any]]:
+    """Return every INS/QUE span with a single 1-based chronological index."""
+    text = str(dialog or "")
+    matches = list(TAG_RE.finditer(text))
+    turns: List[Dict[str, Any]] = []
+    for index, match in enumerate(matches, start=1):
+        end = matches[index].start() if index < len(matches) else len(text)
+        turns.append({
+            "turn": index,
+            "role": match.group(1).upper(),
+            "text": text[match.end():end].strip(),
+        })
+    return turns
+
+
+def _numbered_dialog(turns: Sequence[Dict[str, Any]]) -> str:
+    return "\n".join(
+        f"{int(item['turn'])} {item['role']}: {item['text']}" for item in turns
+    )
+
+
+def _response_content(payload: Dict[str, Any]) -> str:
+    try:
+        content = payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("model response has no choices[0].message.content") from exc
+    if isinstance(content, list):
+        content = "".join(
+            str(item.get("text") or "") if isinstance(item, dict) else str(item)
+            for item in content
+        )
+    content = str(content or "").strip()
+    if not content:
+        raise ValueError("model response content is empty")
+    return content
+
+
+def _decode_json_object(content: str) -> Dict[str, Any]:
+    text = str(content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        value = None
+        for index, character in enumerate(text):
+            if character != "{":
+                continue
+            try:
+                candidate, _ = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                value = candidate
+                break
+        if value is None:
+            raise ValueError("model content does not contain a JSON object")
+    if not isinstance(value, dict):
+        raise ValueError("model JSON must be an object")
+    return value
+
+
+def _request_chat_completion(
+    messages: Sequence[Dict[str, str]],
+    *,
+    api_token: str,
+    url: str,
+    model: str,
 ) -> str:
-    headers = {
-        "Authorization": f"Bearer {api_token}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "stream": False,
-        "model": model,
-        "temperature": 0.0,
-        "messages": [
-            {"role": "system", "content": _SINGLE_STEP_SYSTEM_PROMPT},
-            {"role": "user", "content": instruction},
-        ],
-    }
+    if not api_token:
+        raise ValueError("QWEN_API_KEY or DASHSCOPE_API_KEY is required")
+    response = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_token}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": list(messages),
+            "temperature": 0,
+            "enable_thinking": False,
+        },
+        timeout=(MODEL_CONNECT_TIMEOUT, MODEL_READ_TIMEOUT),
+    )
+    response.raise_for_status()
+    return _response_content(response.json())
+
+
+def _initial_messages(turns: Sequence[Dict[str, Any]]) -> List[Dict[str, str]]:
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": "Parse these numbered turns:\n" + _numbered_dialog(turns),
+        },
+    ]
+
+
+def _repair_messages(
+    turns: Sequence[Dict[str, Any]],
+    previous_content: str,
+    issues: Sequence[str],
+) -> List[Dict[str, str]]:
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": (
+                "Parse these numbered turns:\n"
+                + _numbered_dialog(turns)
+                + "\n\nYour previous JSON was structurally unusable:\n"
+                + previous_content
+                + "\n\nFix only these structural issues:\n- "
+                + "\n- ".join(str(item) for item in issues)
+                + "\nReturn the complete entities/events JSON object only."
+            ),
+        },
+    ]
+
+
+def _write_failure_debug(
+    path: Optional[Path],
+    *,
+    plan_id: str,
+    attempts: Sequence[Dict[str, Any]],
+) -> None:
+    if path is None:
+        return
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"plan_id": plan_id, "attempts": list(attempts)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def request_model_plan(
+    dialog: str,
+    *,
+    plan_id: str,
+    api_token: str = MODEL_API_TOKEN,
+    url: str = MODEL_URL,
+    model: str = MODEL_NAME,
+    failure_debug_path: Optional[Path] = None,
+) -> Tuple[InstructionPlan, bool]:
+    """Generate, normalize and minimally validate one flat plan."""
+    turns = parse_tagged_turns(dialog)
+    if not turns:
+        raise ValueError("dialog contains no [INS] or [QUE] turns")
+    messages = _initial_messages(turns)
+    attempts: List[Dict[str, Any]] = []
+    previous_content = ""
+    previous_issues: List[str] = []
+    for attempt_index in range(2):
+        if attempt_index:
+            messages = _repair_messages(turns, previous_content, previous_issues)
+        content = _request_chat_completion(
+            messages,
+            api_token=api_token,
+            url=url,
+            model=model,
+        )
+        try:
+            raw = _decode_json_object(content)
+            plan, issues = normalize_instruction_plan(
+                raw,
+                plan_id=plan_id,
+                turns=turns,
+            )
+        except ValueError as exc:
+            plan = InstructionPlan(plan_id=plan_id, turns=turns)
+            issues = [str(exc)]
+        attempts.append({
+            "attempt": attempt_index + 1,
+            "content": content,
+            "issues": issues,
+        })
+        if not issues:
+            return plan, bool(attempt_index)
+        previous_content = content
+        previous_issues = list(issues)
+    _write_failure_debug(
+        failure_debug_path,
+        plan_id=plan_id,
+        attempts=attempts,
+    )
+    raise ValueError(
+        "instruction plan remained invalid after one repair: "
+        + "; ".join(previous_issues)
+    )
+
+
+def _write_jsonl(path: Path, records: Sequence[Dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file_obj:
+        for record in records:
+            file_obj.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
+            file_obj.write("\n")
+
+
+def _write_summary(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
+    fields = [
+        "plan_id",
+        "map_name",
+        "route_idx",
+        "parser_model",
+        "repaired",
+        "event_index",
+        "turn",
+        "type",
+        "entity",
+        "direction_frame",
+        "direction_angle",
+        "mode",
+        "count",
+        "side",
+        "source",
+    ]
+    with path.open("w", newline="", encoding="utf-8-sig") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def compile_dataset_instruction_plans(
+    anno_dir: Path = ANNO_DIR,
+    dataset_dir: Path = DATASET_DIR,
+    split: str = SPLIT,
+    pred_dir: Path = PRED_DIR,
+    max_dialogs: int = MAX_DIALOGS,
+    *,
+    api_token: str = MODEL_API_TOKEN,
+    model: str = MODEL_NAME,
+    url: str = MODEL_URL,
+) -> List[Dict[str, Any]]:
+    """Parse a split, preserve successful plans, and report every failure."""
+    if not api_token:
+        raise RuntimeError("QWEN_API_KEY or DASHSCOPE_API_KEY is required for Parse.py")
     try:
-        resp = requests.post(base_url, json=payload, headers=headers, timeout=60)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        raise RuntimeError(f"Request to cfgpu failed: {e}") from e
+        from torch.utils.data import DataLoader
+        from env import ANDHNavBatch
+    except ImportError as exc:
+        raise RuntimeError("dataset compilation requires torch and src/env.py") from exc
 
-    data = resp.json()
-    try:
-        return data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        if isinstance(data, dict):
-            for key in ("content", "text", "output"):
-                if key in data and isinstance(data[key], str):
-                    return data[key]
-        raise RuntimeError(f"Unexpected response schema: {data}")
-
-pattern_en = re.compile(
-    r"Next\s*movement\s*direction\s*:\s*(?P<dir>.*?)\s+"
-    r"Destination\s*description\s*:\s*(?P<dest>.*?)(?:\s+"
-    r"(?:Via|Waypoints|Through)\s*:\s*(?P<via>.*))?\s*$",
-    re.IGNORECASE | re.S,
-)
-pattern_zh = re.compile(
-    r"下一步移动方向[^：]*：\s*(?P<dir>.*?)\s+"
-    r"(?:目的地描述|目的地)[^：]*：\s*(?P<dest>.*?)(?:\s+"
-    r"(?:途径点|经由)[^：]*：\s*(?P<via>.*))?\s*$",
-    re.S,
-)
-
-def parse_model_output(output: str) -> Tuple[str, str, str]:
-    output = (output or "").strip()
-    m = pattern_en.search(output) or pattern_zh.search(output)
-    if not m:
-        return "", output, ""
-    move_dir = (m.group("dir") or "").strip()
-    dest = (m.group("dest") or "").strip()
-    via = (m.group("via") or "").strip()
-    return move_dir, dest, via
-
-INS_BLOCK_MULTI = re.compile(r"\[\s*INS\s*\]\s*(.+?)(?=(?:\n\s*\[|$))", re.IGNORECASE | re.DOTALL)
-
-def extract_all_ins(text: str) -> List[str]:
-    if not isinstance(text, str):
-        return [""]
-    arr = [m.group(1).strip() for m in INS_BLOCK_MULTI.finditer(text)]
-    return arr if arr else [text.strip()]
-
-CLOCK_ALIAS = {
-    "forward": "12",
-    "front": "12",
-    "ahead": "12",
-    "straight": "12",
-    "right": "3",
-    "left": "9",
-    "back": "6",
-    "backward": "6",
-    "front-right": "1:30",
-    "front-left": "10:30",
-    "back-right": "4:30",
-    "back-left": "7:30",
-}
-
-CLOCK_DEG_MAP = {
-    0: "12:00",
-    45: "1:30",
-    90: "3:00",
-    135: "4:30",
-    180: "6:00",
-    225: "7:30",
-    270: "9:00",
-    315: "10:30",
-}
-
-DEGREE_MARK = re.compile(r"^(\d+)\s*°$")
-CLOCK_MARK = re.compile(r"^(\d{1,2})(?::(\d{1,2}))?$")
-
-def clock_to_angle_deg(clock_str: str) -> float:
-    s = str(clock_str).strip().replace("点", "").replace("方向", "")
-    m = CLOCK_MARK.fullmatch(s)
-    if not m:
-        alias = CLOCK_ALIAS.get(s.lower())
-        if alias:
-            m = CLOCK_MARK.fullmatch(alias)
-        if not m:
-            return 0.0
-    hour = int(m.group(1)) % 12
-    minute = int(m.group(2) or 0)
-    return (hour * 30.0 + minute * 0.5) % 360.0
-
-def quantize_deg_to_clock(angle: float) -> str:
-    nearest = int((((float(angle) % 360.0) + 22.5) // 45) * 45) % 360
-    return CLOCK_DEG_MAP.get(nearest, CLOCK_DEG_MAP[0])
-
-def generate_view_corners_with_scale(center_point, ob, scale_factor=1.0, angle_deg=None):
-    center_point = np.array(center_point, dtype=float).reshape(2,)
-    lat_min, lng_min = ob['gps_botm_left']
-    lat_max, lng_max = ob['gps_top_right']
-    h, w = ob['map_size'][:2]
-
-    lat_per_px = (lat_max - lat_min) / h
-    lng_per_px = (lng_max - lng_min) / w
-
-    base_pixels = 224 * float(scale_factor)
-    half_lat = (base_pixels / 2) * lat_per_px
-    half_lng = (base_pixels / 2) * lng_per_px
-
-    if angle_deg is None:
-        return np.array([
-            [center_point[0] + half_lat, center_point[1] - half_lng],
-            [center_point[0] + half_lat, center_point[1] + half_lng],
-            [center_point[0] - half_lat, center_point[1] + half_lng],
-            [center_point[0] - half_lat, center_point[1] - half_lng],
-        ], dtype=float)
-
-    theta = np.radians(float(angle_deg))
-    cos_t, sin_t = np.cos(theta), np.sin(theta)
-
-    local = np.array([
-        [+half_lat, -half_lng],
-        [+half_lat, +half_lng],
-        [-half_lat, +half_lng],
-        [-half_lat, -half_lng],
-    ], dtype=float)
-    R = np.array([[cos_t, -sin_t], [sin_t, cos_t]], dtype=float)
-    rot = local @ R.T
-    return rot + center_point
-
-def create_view_image(view_corners, ob, save_path=None):
-    try:
-        map_path = os.path.join(ob['dataset_dir'], 'train_images', f"{ob['map_name']}.tif")
-        if not os.path.exists(map_path):
-            print(f"[WARN] map file not found: {map_path}")
-            return None
-
-        sat_map = cv2.imread(map_path, cv2.IMREAD_COLOR)
-        if sat_map is None:
-            print(f"[WARN] failed to read map: {map_path}")
-            return None
-
-        h, w = sat_map.shape[:2]
-        lat_min, lng_min = ob['gps_botm_left']
-        lat_max, lng_max = ob['gps_top_right']
-
-        src = []
-        for lat, lng in view_corners:
-            x = (lng - lng_min) / (lng_max - lng_min) * w
-            y = (lat_max - lat) / (lat_max - lat_min) * h
-            src.append([x, y])
-        src = np.array(src, dtype=np.float32)
-        src[:, 0] = np.clip(src[:, 0], 0, w - 1)
-        src[:, 1] = np.clip(src[:, 1], 0, h - 1)
-
-        if cv2.contourArea(src.astype(np.float32)) < 1.0:
-            print("[WARN] view area too small")
-            return None
-
-        dst = np.array([[0, 0], [223, 0], [223, 223], [0, 223]], dtype=np.float32)
-        M = cv2.getPerspectiveTransform(src, dst)
-        patch = cv2.warpPerspective(sat_map, M, (224, 224))
-        if patch is None or patch.size == 0:
-            print("[WARN] perspective warp returned empty")
-            return None
-
-        if save_path:
-            cv2.imwrite(save_path, patch)
-        return patch
-    except Exception as e:
-        print(f"[ERROR] crop failed: {e}")
-        return None
-
-def run_multistep_min_rot(
-    anno_dir: str,
-    dataset_dir: str,
-    split: str,
-    pred_dir: str,
-    max_steps: int = 8,
-    scale_factor: float = 3.0,
-    results_csv_name: str = "parsing_results_full_raw.csv",
-    results_csv_name_post: str = "parsing_results_full_clock.csv",
-):
-    os.makedirs(pred_dir, exist_ok=True)
-    step_dir = os.path.join(pred_dir, "stepwise_views")
-    os.makedirs(step_dir, exist_ok=True)
-
-    tif_dataset_dir = os.path.join(dataset_dir, 'train_images')
-    env = ANDHNavBatch(
-        anno_dir=anno_dir,
-        dataset_dir=tif_dataset_dir,
+    pred_dir = Path(pred_dir)
+    pred_dir.mkdir(parents=True, exist_ok=True)
+    environment = ANDHNavBatch(
+        anno_dir=str(anno_dir),
+        dataset_dir=str(Path(dataset_dir) / "train_images"),
         splits=[split],
         tokenizer=None,
         max_instr_len=512,
@@ -273,283 +365,86 @@ def run_multistep_min_rot(
         seed=0,
         full_traj=False,
     )
-    loader = DataLoader(env, batch_size=1)
+    loader = DataLoader(environment, batch_size=1)
+    records: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+    summary_rows: List[Dict[str, Any]] = []
+    total = min(environment.size(), max_dialogs) if max_dialogs else environment.size()
+    print(f"[parser] dialogs={total} model={model} format={FORMAT_VERSION}", flush=True)
 
-    try:
-        total_samples = len(loader)
-    except Exception:
-        total_samples = "unknown"
-    print(f"ANDHNavBatch loaded with {total_samples} instructions, using splits: {split}")
-
-    rows = []
-
-    def _safe(s):
-        return re.sub(r'[^\w\-.]+', '_', str(s))
-
-    for batch_idx, _ in enumerate(tqdm(loader, desc="samples")):
-        obs_list = env._get_obs(t=0)
-        assert len(obs_list) == 1
-        ob = obs_list[0]
-        ob["dataset_dir"] = dataset_dir
-
-        map_name = str(ob.get("map_name", ""))
-        route_idx = ob.get("route_index", "")
-        instr_id = f"{_safe(map_name)}__{_safe(route_idx)}"
-        raw_dialog = ob.get("instructions", "")
-        ins_list = extract_all_ins(raw_dialog)
-
-        print(f"[SAMPLE {batch_idx+1}] map_name={map_name} route={route_idx} | INS_count={len(ins_list)}")
-
-        start_corners = np.array(ob['gt_path_corners'][0])
-        pos = np.mean(start_corners, axis=0)
-        heading = float(ob.get("starting_angle", 0.0) or 0.0)
-
-        corners0 = generate_view_corners_with_scale(pos, ob, scale_factor=scale_factor, angle_deg=heading)
-        patch0 = create_view_image(corners0, ob)
-        if patch0 is None:
-            print("[WARN] start patch crop failed, skipping sample.")
+    for dataset_index, _ in enumerate(loader):
+        if max_dialogs and dataset_index >= max_dialogs:
+            break
+        observations = environment._get_obs(t=0)
+        if not observations:
+            failures.append({"dataset_index": dataset_index, "error": "no observation"})
             continue
-
-        lat_min, lng_min = ob['gps_botm_left']
-        lat_max, lng_max = ob['gps_top_right']
-        h, w = ob['map_size'][:2]
-        x_map = (pos[1] - lng_min) / (lng_max - lng_min) * w
-        y_map = (lat_max - pos[0]) / (lat_max - lat_min) * h
-        src_point = np.array([[x_map, y_map]], dtype=np.float32)
-
-        src = []
-        for lat, lng in corners0:
-            x = (lng - lng_min) / (lng_max - lng_min) * w
-            y = (lat_max - lat) / (lat_max - lat_min) * h
-            src.append([x, y])
-        src = np.array(src, dtype=np.float32)
-        dst = np.array([[0, 0], [223, 0], [223, 223], [0, 223]], dtype=np.float32)
-        M = cv2.getPerspectiveTransform(src, dst)
-        dst_point = cv2.perspectiveTransform(src_point[None, :, :], M)[0, 0]
-        px, py = int(dst_point[0]), int(dst_point[1])
-        if 0 <= px < 224 and 0 <= py < 224:
-            cv2.circle(patch0, (px, py), radius=5, color=(0, 255, 0), thickness=-1)
-        debug_name = f"{instr_id}_step00_start_with_point.jpg"
-        cv2.imwrite(os.path.join(step_dir, debug_name), patch0)
-
-        for step_idx, instruction in enumerate(ins_list, start=1):
-            if max_steps and step_idx > int(max_steps):
-                break
-
-            print(f"  [INS step {step_idx}] {instruction}")
-            try:
-                output = analyze_instruction_with_prompt(instruction)
-            except Exception as e:
-                print(f"[ERROR] analyze_instruction_with_prompt failed: {e}")
-                output = ""
-
-            print("  Model raw output:\n", output)
-
-            move_dir, dest, via = parse_model_output(output)
-
-            angle_before = float(heading)
-            angle_after = float(heading)
-
-            m_deg = DEGREE_MARK.match(move_dir)
-            if m_deg:
-                abs_angle = int(m_deg.group(1)) % 360
-                angle_after = float(abs_angle)
-                heading = angle_after
-            else:
-                m_clock = CLOCK_MARK.match(move_dir)
-                if m_clock:
-                    rel = clock_to_angle_deg(move_dir)
-                    angle_after = float((heading + rel) % 360)
-                    heading = angle_after
-                else:
-                    angle_after = float(heading)
-
-            rows.append({
-                "instr_id": instr_id,
+        observation = observations[0]
+        map_name = str(observation.get("map_name") or "")
+        route_idx = observation.get("route_index", dataset_index)
+        plan_id = f"{map_name}__{route_idx}"
+        dialog = str(observation.get("instructions") or "")
+        turns = parse_tagged_turns(dialog)
+        started = time.perf_counter()
+        try:
+            plan, repaired = request_model_plan(
+                dialog,
+                plan_id=plan_id,
+                api_token=api_token,
+                url=url,
+                model=model,
+                failure_debug_path=pred_dir / "model_debug" / f"{plan_id}.json",
+            )
+        except (requests.RequestException, ValueError) as exc:
+            failures.append({
+                "plan_id": plan_id,
                 "map_name": map_name,
                 "route_idx": route_idx,
-                "step_idx": step_idx,
-                "instruction": instruction,
-                "move_dir": move_dir,
-                "dest": dest,
-                "via": via,
-                "angle_before": angle_before,
-                "angle_after": angle_after,
-                "raw_output": (output or "").strip(),
+                "error": str(exc),
             })
-
-    results_csv = os.path.join(pred_dir, results_csv_name)
-    with open(results_csv, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(
-            f,
-            fieldnames=[
-                "instr_id","map_name","route_idx","step_idx","instruction",
-                "move_dir","dest","via","angle_before","angle_after","raw_output"
-            ],
+            print(f"[parser] {plan_id} FAILED: {exc}", flush=True)
+            continue
+        record = {
+            "format_version": FORMAT_VERSION,
+            "plan_id": plan_id,
+            "map_name": map_name,
+            "route_idx": route_idx,
+            "starting_heading_deg": float(observation.get("starting_angle") or 0.0),
+            "turns": turns,
+            "parser_model": model,
+            "repaired": repaired,
+            "plan": plan.to_dict(),
+        }
+        records.append(record)
+        for row in event_summary_rows(plan):
+            row.update({
+                "map_name": map_name,
+                "route_idx": route_idx,
+                "parser_model": model,
+                "repaired": repaired,
+            })
+            summary_rows.append(row)
+        print(
+            f"[parser] {plan_id} events={len(plan.events)} entities={len(plan.entities)} "
+            f"repaired={repaired} elapsed={time.perf_counter() - started:.2f}s",
+            flush=True,
         )
-        writer.writeheader()
-        writer.writerows(rows)
 
-    print(f"\nCSV written to: {results_csv}")
-    print(f"Screenshot dir: {os.path.join(pred_dir, 'stepwise_views')}")
+    _write_jsonl(pred_dir / "instruction_plans.jsonl", records)
+    _write_jsonl(pred_dir / "instruction_plan_failures.jsonl", failures)
+    _write_summary(pred_dir / "parsing_results_full.csv", summary_rows)
+    if failures:
+        raise RuntimeError(
+            f"{len(failures)} instruction plans failed; see "
+            f"{pred_dir / 'instruction_plan_failures.jsonl'}"
+        )
+    return records
 
-    try:
-        df = pd.read_csv(results_csv)
-        def convert_row(row):
-            s = str(row["move_dir"]).strip()
-            m = DEGREE_MARK.match(s)
-            if not m:
-                return s
-            abs_angle = int(m.group(1)) % 360
-            angle_before = float(row["angle_before"])
-            rel = (abs_angle - angle_before) % 360
-            return quantize_deg_to_clock(rel)
-        df["move_dir"] = df.apply(convert_row, axis=1)
-        out_csv = os.path.join(pred_dir, results_csv_name_post)
-        df.to_csv(out_csv, index=False, encoding="utf-8-sig")
-        print(f"Relative-clock CSV written to: {out_csv}")
-    except Exception as e:
-        print(f"[WARN] post-processing failed (skipping): {e}")
 
-def safe_read_csv(path: Path, encodings: Iterable[str] = ("utf-8-sig", "utf-8", "gbk", "cp1252", "latin1")) -> Tuple[pd.DataFrame, str]:
-    last_err = None
-    for enc in encodings:
-        try:
-            df = pd.read_csv(path, encoding=enc)
-            return df, enc
-        except Exception as e:
-            last_err = e
-    if last_err is not None:
-        raise last_err
-    raise RuntimeError("Failed to read CSV with provided encodings.")
+def main() -> None:
+    records = compile_dataset_instruction_plans()
+    print(f"compiled {len(records)} instruction plans into {PRED_DIR}", flush=True)
 
-CLOCK_MAP = {
-    0: "12:00",
-    45: "1:30",
-    90: "3:00",
-    135: "4:30",
-    180: "6:00",
-    225: "7:30",
-    270: "9:00",
-    315: "10:30",
-}
-DEGREE_MARK = re.compile(r"^(\d+)\s*°$")
-# Keep the CLOCK_MARK definition above.  Redefining it here without a
-# capturing group for minutes makes clock_to_angle_deg(m.group(2)) fail.
-
-def degree_to_clock(angle: float) -> str:
-    a = float(angle) % 360.0
-    nearest = (int(((a + 22.5) // 45) * 45)) % 360
-    return CLOCK_MAP.get(nearest, CLOCK_MAP[0])
-
-def _pick_angle_baseline(row) -> float:
-    for key in ("angle_before", "angle", "starting_angle"):
-        if key in row and pd.notna(row[key]):
-            try:
-                return float(row[key])
-            except Exception:
-                pass
-    return 0.0
-
-def convert_move_dir_row(move_dir_value, angle_baseline_value) -> str:
-    move_dir = str(move_dir_value).strip()
-    try:
-        base = float(angle_baseline_value)
-    except Exception:
-        base = 0.0
-
-    m = DEGREE_MARK.match(move_dir)
-    if m:
-        abs_angle = int(m.group(1)) % 360
-        rel_angle = (abs_angle - base) % 360
-        return degree_to_clock(rel_angle)
-    else:
-        return move_dir
-
-INS_BLOCK = re.compile(r"\[\s*INS\s*\](.*?)(?:\[\s*/\s*INS\s*\]|$)", flags=re.IGNORECASE | re.DOTALL)
-FORWARD_PATTERN = re.compile(
-    r"(?:\b(?:go|move|fly|proceed|continue)\s*(?:straight|forward|forword)\b)"
-    r"|(?:\b(?:straight(?:\s*ahead)?|forward|forword)\b)"
-    r"|(?:直(?:走|行)|forward|proceed forward|笔直)",
-    flags=re.IGNORECASE
-)
-
-def extract_ins(text: str) -> str:
-    if not isinstance(text, str):
-        return ""
-    m = INS_BLOCK.search(text)
-    return (m.group(1) if m else text).strip()
-
-def has_forward(ins_text: str) -> bool:
-    return bool(FORWARD_PATTERN.search(ins_text or ""))
-
-CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
-def clean_text(x):
-    if not isinstance(x, str):
-        return x
-    x = x.replace("\r\n", "\n").replace("\r", "\n")
-    x = CONTROL_CHARS.sub("", x)
-    x = re.sub(r"[ \t]+", " ", x)
-    return x.strip()
-
-def postprocess_csv(pred_dir=PRED_DIR):
-    input_csv = Path(pred_dir) / "parsing_results_full_raw.csv"
-    intermediate_out = Path(pred_dir) / "parsing_results_full_clock.csv"
-    final_out = Path(pred_dir) / "parsing_results_full.csv"
-
-    df, used_enc = safe_read_csv(input_csv)
-    if "move_dir" in df.columns:
-        df["__angle_base__"] = [_pick_angle_baseline(row) for _, row in df.iterrows()]
-        df["move_dir"] = [convert_move_dir_row(md, ang) for md, ang in zip(df["move_dir"], df["__angle_base__"])]
-    else:
-        print("Warning: missing column 'move_dir' - skip conversion.")
-    df.to_csv(intermediate_out, index=False, encoding="utf-8-sig")
-    print("Intermediate saved to:", intermediate_out)
-    print("Read encoding (step1):", used_enc)
-
-    df2, used_enc2 = safe_read_csv(intermediate_out)
-    if "dest" in df2.columns:
-        dest_series = df2["dest"].astype(str).str.strip().str.lower()
-        is_dest = dest_series.eq("destination") | dest_series.eq("目的地")
-    else:
-        is_dest = pd.Series([False] * len(df2))
-    ins_series = df2.get("instruction", pd.Series([""] * len(df2))).astype(str).map(extract_ins)
-    forward_bool = is_dest & ins_series.map(has_forward)
-    df2["forward_bool"] = forward_bool
-    df2["forward"] = forward_bool.map(lambda v: "TRUE" if bool(v) else "FALSE")
-    for col in df2.columns:
-        if df2[col].dtype == object:
-            df2[col] = df2[col].astype(str).map(clean_text)
-    preferred_order = [
-        "instr_id", "map_name", "route_idx", "step_idx", "instruction",
-        "move_dir", "dest", "via", "forward", "forward_bool",
-        "angle", "angle_before", "angle_after", "raw_output"
-    ]
-    cols = [c for c in preferred_order if c in df2.columns] + [c for c in df2.columns if c not in preferred_order]
-    df2 = df2[cols]
-    df2.to_csv(
-        final_out,
-        index=False,
-        encoding="utf-8-sig",
-        lineterminator="\r\n",
-        quoting=csv.QUOTE_MINIMAL,
-    )
-    print("Read encoding (step2):", used_enc2)
-    print("Final saved to:", final_out)
-
-def main():
-    os.makedirs(PRED_DIR, exist_ok=True)
-    run_multistep_min_rot(
-        anno_dir=ANNO_DIR,
-        dataset_dir=DATASET_DIR,
-        split=SPLIT,
-        pred_dir=PRED_DIR,
-        max_steps=MAX_STEPS,
-        scale_factor=SCALE_FACTOR,
-        results_csv_name="parsing_results_full_raw.csv",
-        results_csv_name_post="parsing_results_full_clock.csv",
-    )
-    postprocess_csv(PRED_DIR)
 
 if __name__ == "__main__":
     main()

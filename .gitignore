@@ -2,3 +2,7 @@ datasets/
 out/
 *.txt
 analyse_tool/
+experiments/
+tests/
+**/__pycache__/
+*.py[cod]
