@@ -59,16 +59,20 @@ markdown or explanations.
 
 entities is a list. Each entity has:
 - id: short stable identifier
-- description: visual description known when the entity is first introduced;
-  put later details in chronological UPDATE_ENTITY events
+- description: one concrete visual description mentioned by an INS turn
 - kind: LANDMARK, REGION, CORRIDOR, or BOUNDARY
 - goal: true only for the final destination
+
+Every visually verifiable object description is a separate entity, even when
+two descriptions may refer to the same physical object. Bind each entity to
+the navigation event that uses or verifies it. Never merge a later description
+into an earlier entity and never emit UPDATE_ENTITY.
 
 events is one chronological list extracted from INS turns only. Keep the
 original dialogue turn number, so event turns may be 1, 3, 5, etc. Each event
 has type and turn. Navigation types are MOVE, TURN, REACH, STOP_AT,
 PASS, APPROACH, CROSS, GO_THROUGH, ENTER, EXIT, FOLLOW, AVOID. Dialogue types
-are UPDATE_ENTITY and PROGRESS.
+contain only PROGRESS.
 
 Optional event fields:
 - entity: entity id, or a concrete description when no id was declared
@@ -76,7 +80,6 @@ Optional event fields:
 - mode: FORWARD or BACKWARD
 - count, side
 - ref and completed for PROGRESS; ref is the 1-based index of an earlier event
-- description for UPDATE_ENTITY
 
 QUE turns are context only for understanding the following INS answer. Never
 emit an event from a QUE turn, never output QUERY, and never extract entities,
@@ -87,9 +90,13 @@ west. Relative 0 is forward; clock bearings are relative (12=0, 3=90, 6=180,
 7=210, 9=270). Preserve the stated event order. A direction remains active
 until a later event changes it, so it need not be repeated. Use PROGRESS only
 when an INS turn explicitly states that an earlier event has already happened;
-visibility or proximity alone is completed=false. Later descriptions from INS
-turns use UPDATE_ENTITY. The final destination
-must be goal=true and must have a REACH event. Do not invent
+visibility or proximity alone is completed=false. Any PASS, CROSS, REACH,
+APPROACH, STOP_AT, GO_THROUGH, ENTER, EXIT, FOLLOW, or AVOID involving an
+object must carry that object's entity id. If an INS says to move toward a
+described object or destination without explicitly saying it is reached, emit
+APPROACH bound to that entity, not a bare MOVE. Use bare MOVE only when no
+object needs visual verification. The final destination must be goal=true and
+must be bound to a navigation event. Do not invent
 segments, motion policies, geometry, source spans, predicates or event ids.
 
 Example 1 input:
@@ -102,7 +109,7 @@ Example 2 input:
 2 QUE: I crossed the roads. What does the destination look like?
 3 INS: It is the yellow warehouse. Continue east until you reach it.
 Example 2 output:
-{"entities":[{"id":"roads","description":"roads","kind":"BOUNDARY","goal":false},{"id":"parking","description":"parking lot","kind":"REGION","goal":false},{"id":"goal","description":"destination","kind":"LANDMARK","goal":true}],"events":[{"type":"CROSS","turn":1,"entity":"roads","direction":{"frame":"absolute","angle":0},"count":2},{"type":"PASS","turn":1,"entity":"parking"},{"type":"UPDATE_ENTITY","turn":3,"entity":"goal","description":"yellow warehouse"},{"type":"REACH","turn":3,"entity":"goal","direction":{"frame":"absolute","angle":90}}]}
+{"entities":[{"id":"roads","description":"roads","kind":"BOUNDARY","goal":false},{"id":"parking","description":"parking lot","kind":"REGION","goal":false},{"id":"yellow_warehouse","description":"yellow warehouse","kind":"LANDMARK","goal":true}],"events":[{"type":"CROSS","turn":1,"entity":"roads","direction":{"frame":"absolute","angle":0},"count":2},{"type":"PASS","turn":1,"entity":"parking"},{"type":"REACH","turn":3,"entity":"yellow_warehouse","direction":{"frame":"absolute","angle":90}}]}
 """.strip()
 
 

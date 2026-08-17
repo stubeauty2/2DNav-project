@@ -201,10 +201,6 @@ def project_instruction_plan(plan: InstructionPlan) -> List[SearchStep]:
         navigation: List[InstructionEvent] = []
         targets: List[ViaTarget] = []
         for event in events:
-            if event.event_type == EventType.UPDATE_ENTITY:
-                if event.entity_ref and event.description:
-                    descriptions[event.entity_ref] = event.description
-                continue
             if event.event_type == EventType.PROGRESS:
                 continue
             if event.event_type not in NAVIGATION_EVENT_TYPES:
@@ -213,8 +209,7 @@ def project_instruction_plan(plan: InstructionPlan) -> List[SearchStep]:
             if event.entity_ref:
                 targets.append(_target_snapshot(event, descriptions))
 
-        # A state-only answer updates descriptions for later turns but never
-        # becomes a visual search or motion step.
+        # PROGRESS-only answers do not become visual-search or motion steps.
         if not navigation:
             continue
 

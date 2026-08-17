@@ -405,7 +405,12 @@ def search_and_reach_destination(
     out_dir,
     step_meters=120.0,
     max_steps=3,
-    api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL
+    api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
+    history_corners=None,
+    history_patches=None,
+    previous_grid_5x5=None,
+    event_context=None,
+    enable_confirmation=True,
 ):
     def _haversine_m(lat1, lng1, lat2, lng2):
         R = 6371000.0
@@ -425,13 +430,21 @@ def search_and_reach_destination(
     dest_latlng = None
 
     predicted_corners_seq = []
+    minimap_corners_seq = [
+        np.asarray(item, dtype=float) for item in (history_corners or [])
+    ]
     zoom_idx = None
-    patch_seq = []
+    patch_seq = [
+        item for item in (history_patches or []) if item is not None
+    ]
 
     first_step_pos = None
     fallback_scale = 2.0
 
-    last_grid_5x5 = None
+    last_grid_5x5 = previous_grid_5x5
+    model_dest_desc = str(dest_desc or "")
+    if event_context:
+        model_dest_desc += "\n\n[Parsed event execution context]\n" + str(event_context)
 
     for k in range(max_steps):
         step_n = k + 1
@@ -440,6 +453,7 @@ def search_and_reach_destination(
             pos, ob, scale_factor=scale_factor, angle_deg=heading
         )
         predicted_corners_seq.append(np.array(corners_k, dtype=float))
+        minimap_corners_seq.append(np.array(corners_k, dtype=float))
 
         step_path = os.path.join(
             out_dir,
@@ -482,14 +496,14 @@ def search_and_reach_destination(
         )
         minimap_bgr = make_minimap_crop_basemap(
             ob,
-            corners_seq=predicted_corners_seq,
+            corners_seq=minimap_corners_seq,
             img_seq=patch_seq,
             out_path=mini_path,
             pad_m=40.0
         )
 
         q = qwen_locate_bbox_in_view(
-            dest_desc,
+            model_dest_desc,
             patch_main_bgr=patch_k,
             patch_s4_bgr=patch_k_s4,
             patch_s8_bgr=patch_k_s8,
@@ -637,19 +651,26 @@ def search_and_reach_destination(
                 draw_pos_on_patch(patch_confirm_s8, corners_confirm_s8, pos)
                 cv2.imwrite(confirm_s7_path, patch_confirm_s8, [cv2.IMWRITE_JPEG_QUALITY, 95])
 
-            q_confirm = qwen_locate_bbox_in_view(
-                dest_desc,
-                patch_main_bgr=patch_confirm,
-                patch_s4_bgr=patch_confirm_s4,
-                patch_s8_bgr=patch_confirm_s8,
-                minimap_bgr=minimap_confirm_bgr,
-                api_key=api_key, url=url, model=model,
-                restrict_top_half=False,
-                prev_grid_5x5=last_grid_5x5
-            )
-            steps_log.append({"k": k, "confirm": q_confirm, "pos": pos})
-
-            last_grid_5x5 = q_confirm.get("grid_5x5") or last_grid_5x5
+            if enable_confirmation:
+                q_confirm = qwen_locate_bbox_in_view(
+                    model_dest_desc,
+                    patch_main_bgr=patch_confirm,
+                    patch_s4_bgr=patch_confirm_s4,
+                    patch_s8_bgr=patch_confirm_s8,
+                    minimap_bgr=minimap_confirm_bgr,
+                    api_key=api_key, url=url, model=model,
+                    restrict_top_half=False,
+                    prev_grid_5x5=last_grid_5x5
+                )
+                steps_log.append({"k": k, "confirm": q_confirm, "pos": pos})
+                last_grid_5x5 = q_confirm.get("grid_5x5") or last_grid_5x5
+            else:
+                q_confirm = {}
+                steps_log.append({
+                    "k": k,
+                    "action": "confirmation_skipped",
+                    "pos": pos,
+                })
 
             confirm_box  = None
             conf_confirm = 0.0

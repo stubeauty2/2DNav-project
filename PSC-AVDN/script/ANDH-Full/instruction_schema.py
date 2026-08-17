@@ -71,7 +71,6 @@ NAVIGATION_EVENT_TYPES = frozenset({
 
 TARGET_EVENT_TYPES = NAVIGATION_EVENT_TYPES - {EventType.MOVE, EventType.TURN}
 STATE_EVENT_TYPES = frozenset({
-    EventType.UPDATE_ENTITY,
     EventType.PROGRESS,
 })
 
@@ -199,6 +198,18 @@ class InstructionEvent:
     def required(self) -> bool:
         return self.event_type in NAVIGATION_EVENT_TYPES
 
+    @property
+    def requires_visual_search(self) -> bool:
+        """Whether executing this event requires entity-grounded vision.
+
+        Visual verification follows the data contract, rather than a hard-coded
+        list of verbs: every executable event carrying an entity is searched
+        and confirmed.  This also covers a model-emitted ``MOVE`` with an
+        entity, although the parser prompt normally represents that relation as
+        ``APPROACH``.
+        """
+        return self.required and bool(self.entity_ref)
+
     def to_dict(self) -> Dict[str, Any]:
         result: Dict[str, Any] = {"type": self.event_type.value, "turn": self.turn}
         if self.entity_ref:
@@ -267,8 +278,10 @@ class InstructionPlan:
                 )
             if event.event_type in TARGET_EVENT_TYPES and not event.entity_ref:
                 errors.append(f"event {event.event_id} requires an entity")
-            if event.event_type == EventType.UPDATE_ENTITY and not event.entity_ref:
-                errors.append(f"event {event.event_id} requires an entity to update")
+            if event.event_type == EventType.UPDATE_ENTITY:
+                errors.append(
+                    f"event {event.event_id} was not converted to an entity-bound event"
+                )
             if event.event_type == EventType.PROGRESS and event.ref:
                 try:
                     ref_index = int(event.ref[1:])
@@ -279,11 +292,12 @@ class InstructionPlan:
                     errors.append(f"event {event.event_id} has invalid progress ref {event.ref}")
         goal_ids = {key for key, entity in self.entities.items() if entity.goal}
         if not any(
-            event.event_type == EventType.REACH
-            and event.entity_ref in goal_ids
+            event.requires_visual_search and event.entity_ref in goal_ids
             for event in self.events
         ):
-            errors.append("events must contain REACH for a goal entity")
+            errors.append(
+                "events must contain an entity-bound navigation event for a goal entity"
+            )
         return errors
 
     def source_for_turn(self, turn: int) -> str:
@@ -304,6 +318,153 @@ def _resolve_ref(raw: Any) -> str:
     if text.isdigit():
         return f"e{int(text)}"
     return text
+
+
+def _unique_entity_id(
+    entities: Dict[str, Entity],
+    description: str,
+    fallback: str,
+) -> str:
+    base = _slug(description, fallback)
+    candidate = base
+    suffix = 2
+    while candidate in entities:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _replace_update_entity_events(
+    entities: Dict[str, Entity],
+    events: List[InstructionEvent],
+) -> List[InstructionEvent]:
+    """Migrate legacy UPDATE_ENTITY records to independent visual entities.
+
+    Each legacy description is intentionally treated as a new entity even when
+    it may refer to the same physical object.  The new entity is bound to the
+    most relevant navigation event in the same INS turn.  When the turn only
+    has an ungrounded MOVE, its last MOVE becomes APPROACH; when it has no such
+    event, UPDATE_ENTITY is replaced in place by a synthetic APPROACH.
+    """
+    update_indices = [
+        index
+        for index, event in enumerate(events)
+        if event.event_type == EventType.UPDATE_ENTITY
+    ]
+    if not update_indices:
+        return events
+
+    removed_indices = set(update_indices)
+    claimed_targets: set[int] = set()
+    replacement_refs: Dict[str, str] = {}
+    synthetic_by_index: Dict[int, InstructionEvent] = {}
+    goal_lineages = {
+        entity_id
+        for entity_id, entity in entities.items()
+        if entity.goal
+    }
+    last_goal_update: Dict[str, int] = {}
+    for index in update_indices:
+        entity_ref = events[index].entity_ref
+        if entity_ref in goal_lineages:
+            last_goal_update[entity_ref] = index
+    for entity_ref in last_goal_update:
+        entities[entity_ref].goal = False
+
+    for update_index in update_indices:
+        update = events[update_index]
+        original = entities.get(update.entity_ref)
+        description = str(update.description or "").strip()
+        if not description:
+            description = (
+                original.description if original is not None else update.entity_ref
+            )
+        new_entity_id = _unique_entity_id(
+            entities,
+            description,
+            f"{update.entity_ref or 'entity'}_t{update.turn}",
+        )
+        entities[new_entity_id] = Entity(
+            entity_id=new_entity_id,
+            description=description,
+            kind=original.kind if original is not None else EntityKind.LANDMARK,
+            goal=last_goal_update.get(update.entity_ref) == update_index,
+        )
+
+        same_turn = [
+            index
+            for index in range(update_index + 1, len(events))
+            if events[index].turn == update.turn
+            and index not in removed_indices
+            and index not in claimed_targets
+        ]
+        target_index = next(
+            (
+                index
+                for index in same_turn
+                if events[index].event_type in TARGET_EVENT_TYPES
+                and events[index].entity_ref == update.entity_ref
+            ),
+            None,
+        )
+        if target_index is None:
+            move_indices = [
+                index
+                for index in same_turn
+                if events[index].event_type == EventType.MOVE
+                and not events[index].entity_ref
+            ]
+            if move_indices:
+                # A destination description commonly precedes a sequence such
+                # as MOVE -> checkpoint -> TURN -> MOVE.  The final MOVE is the
+                # one that approaches the newly described destination.
+                target_index = move_indices[-1]
+
+        if target_index is not None:
+            target = events[target_index]
+            target.entity_ref = new_entity_id
+            if target.event_type == EventType.MOVE:
+                target.event_type = EventType.APPROACH
+            claimed_targets.add(target_index)
+            replacement_refs[update.event_id] = target.event_id
+            continue
+
+        synthetic = InstructionEvent(
+            event_id=update.event_id,
+            event_type=EventType.APPROACH,
+            turn=update.turn,
+            entity_ref=new_entity_id,
+            direction=update.direction,
+            travel_mode=update.travel_mode,
+            count=update.count,
+            side=update.side,
+            source_span=update.source_span,
+        )
+        synthetic_by_index[update_index] = synthetic
+        replacement_refs[update.event_id] = synthetic.event_id
+
+    migrated: List[InstructionEvent] = []
+    for index, event in enumerate(events):
+        if index in removed_indices:
+            synthetic = synthetic_by_index.get(index)
+            if synthetic is not None:
+                migrated.append(synthetic)
+            continue
+        migrated.append(event)
+
+    old_to_new: Dict[str, str] = {}
+    for new_index, event in enumerate(migrated, start=1):
+        old_id = event.event_id
+        event.event_id = f"e{new_index}"
+        old_to_new[old_id] = event.event_id
+    for old_update_id, old_target_id in replacement_refs.items():
+        if old_target_id in old_to_new:
+            old_to_new[old_update_id] = old_to_new[old_target_id]
+
+    for event in migrated:
+        if event.event_type == EventType.PROGRESS and event.ref:
+            event.ref = old_to_new.get(event.ref, "")
+    return migrated
 
 
 def normalize_instruction_plan(
@@ -479,17 +640,17 @@ def normalize_instruction_plan(
             continue
         event.ref = raw_index_to_event_id.get(raw_ref_index, "")
 
-    reaches = [
+    events = _replace_update_entity_events(entities, events)
+
+    visual_targets = [
         event
         for event in events
-        if event.event_type == EventType.REACH and event.entity_ref
+        if event.requires_visual_search
     ]
-    if reaches:
-        current_goals = {key for key, value in entities.items() if value.goal}
-        if not any(event.entity_ref in current_goals for event in reaches):
-            for entity in entities.values():
-                entity.goal = False
-            entities[reaches[-1].entity_ref].goal = True
+    # Trust an explicit goal flag even when the final relation is APPROACH or
+    # another visual event.  Only infer a goal when the model supplied none.
+    if visual_targets and not any(entity.goal for entity in entities.values()):
+        entities[visual_targets[-1].entity_ref].goal = True
 
     plan = InstructionPlan(
         plan_id=str(plan_id or "").strip(),
