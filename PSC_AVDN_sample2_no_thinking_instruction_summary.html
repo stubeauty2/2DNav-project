@@ -1,0 +1,2129 @@
+<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>sample2 无 Thinking 指令解析总结</title><style>
+:root{--bg:#f4f7fb;--paper:#fff;--ink:#17243a;--muted:#65758a;--line:#d9e3ee;--blue:#256fd1;--blue-soft:#e8f1ff;--green:#087d5b;--green-soft:#e2f6ef;--orange:#b45b08;--orange-soft:#fff0dc;--purple:#6844b5;--purple-soft:#f0eaff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.62 "Segoe UI","Microsoft YaHei",sans-serif}.hero{padding:38px max(20px,calc((100vw - 1500px)/2));background:linear-gradient(135deg,#0a1728,#164d7a);color:#fff}.hero h1{font-size:40px;margin:4px 0}.hero p{max-width:980px;color:#d3dfed;margin:4px 0}.stats{display:flex;gap:24px;flex-wrap:wrap;margin-top:20px}.stats div{min-width:100px}.stats b{display:block;font-size:25px}.stats span{color:#bcd0e5;font-size:12px}main{max-width:1500px;margin:auto;padding:24px 20px 70px}.controls{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:14px}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:7px;padding:9px 10px}button{cursor:pointer}.distribution{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 22px}.distribution span{background:var(--paper);border:1px solid var(--line);border-radius:99px;padding:4px 9px;color:var(--muted)}.distribution b{color:var(--ink)}.visible-count{color:var(--muted);margin-bottom:8px}.route{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}.route[hidden]{display:none}.route>summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 16px;cursor:pointer}.route>summary strong{font-size:17px;margin-right:auto}.route>summary>span:not(.route-number):not(.repair){color:var(--muted)}.route-number{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--blue-soft);color:var(--blue);font-weight:600}.repair{padding:3px 8px;border-radius:99px}.repair.no{background:var(--green-soft);color:var(--green)}.repair.yes{background:var(--orange-soft);color:var(--orange)}.route-body{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}.route-body>section{padding:17px;min-width:0}.route-body>section+section{border-left:1px solid var(--line)}h3{font-size:16px;margin:0 0 10px}.turns,.entities,.events{list-style:none;margin:0;padding:0}.turns li{display:grid;grid-template-columns:auto auto 1fr;gap:8px;align-items:start;margin:0 0 10px}.turns p,.entities p,.events p{margin:0}.role,.turn-index,.kind,.goal,.event-index,.event-type,.event-turn{display:inline-block;font-size:11px;border-radius:5px;padding:2px 6px;white-space:nowrap}.role.ins{background:var(--blue-soft);color:var(--blue)}.role.que{background:var(--purple-soft);color:var(--purple)}.turn-index,.event-turn{color:var(--muted);background:var(--bg)}.entities li{border-left:3px solid var(--green);padding:7px 10px;margin-bottom:8px;background:var(--green-soft)}.entities li>div{display:flex;gap:7px;align-items:center}.kind{background:var(--paper);color:var(--muted)}.goal{background:var(--orange-soft);color:var(--orange)}.events li{display:grid;grid-template-columns:auto auto auto 1fr;gap:7px;align-items:start;padding:7px 0;border-bottom:1px solid var(--line)}.event-index{background:var(--blue-soft);color:var(--blue)}.event-type{background:var(--purple-soft);color:var(--purple)}.events p{color:var(--muted);overflow-wrap:anywhere}.raw{margin-top:14px}.raw summary{cursor:pointer;color:var(--blue)}pre{background:#111d2c;color:#e8eef6;padding:13px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:430px;overflow:auto}.empty{padding:35px;text-align:center;color:var(--muted)}footer{margin-top:28px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}@media(max-width:900px){.controls{grid-template-columns:1fr 1fr}.route-body{grid-template-columns:1fr}.route-body>section+section{border-left:0;border-top:1px solid var(--line)}}@media(max-width:560px){.hero h1{font-size:30px}.controls{grid-template-columns:1fr}.route>summary strong{width:calc(100% - 50px)}.events li{grid-template-columns:auto auto auto}.events p{grid-column:1/-1}}
+</style></head><body>
+<header class='hero'><small>PSC-AVDN · SAMPLE2 · NO THINKING · INSTRUCTION PLAN V2</small><h1>sample2 无 Thinking 指令解析总结</h1><p>逐条整合原始完整 INS/QUE 对话与 QWEN no-thinking 输出的 entities、ordered events、方向、地标关系及空间约束。repaired 仅表示是否使用过一次结构修复，不评价语义正确性。</p><div class='stats'><div><b>20</b><span>解析计划</span></div><div><b>69</b><span>实体</span></div><div><b>142</b><span>事件</span></div><div><b>1</b><span>结构修复后接受</span></div><div><b>0</b><span>解析失败</span></div></div></header>
+<main><section class='controls' aria-label='筛选'><label>搜索轨迹、指令或实体<input id='plan-search' type='search' placeholder='例如 2618__5、parking、REACH'></label><label>结构修复<select id='repair-filter'><option value=''>全部</option><option value='false'>repaired=false</option><option value='true'>repaired=true</option></select></label><label>事件类型<select id='type-filter'><option value=''>全部事件</option><option value='MOVE'>MOVE (18)</option><option value='PASS'>PASS (29)</option><option value='REACH'>REACH (39)</option><option value='TURN'>TURN (56)</option></select></label><button id='expand-visible' type='button'>展开 / 折叠可见项</button></section>
+<div class='distribution' aria-label='事件类型分布'><span><b>TURN</b> 56</span><span><b>REACH</b> 39</span><span><b>PASS</b> 29</span><span><b>MOVE</b> 18</span></div><div id='visible-count' class='visible-count'></div><section id='routes'>
+<details class="route" data-search="2518__1 [ins] destination is a pair of small buildings at the end of the parking lot at your five o&#x27;clock. [que] how to go to destinaton? what is the destination look like?. [ins] your destination is a pair of buildings like garages. please keep moving forward up to the tree on your way, then turn left and move to the final point. [que] which direction should i go? how does the destination look like?. [ins] they are at your 7:00. turn around. you will pass a line of parked cars on your right. then you will see two small buildings next to each other. the front of the one on the right is slightly behind the front of the one on the left. tree on the way to the destination line of parked cars pair of small buildings like garages, next to each other, front of right one slightly behind left one move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN" open>
+  <summary>
+    <span class="route-number">01</span>
+    <strong>2518__1</strong>
+    <span>5 turns</span><span>3 entities</span><span>6 events</span>
+    <span>start heading=205.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Destination is a pair of small buildings at the end of the parking lot at your five o&#x27;clock.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>How to go to destinaton? What is the destination look like?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Your destination is a pair of buildings like garages. Please keep moving forward up to the tree on your way, then turn left and move to the final point.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>Which direction should I go? How does the destination look like?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>They are at your 7:00. Turn around. You will pass a line of parked cars on your right. Then you will see two small buildings next to each other. The front of the one on the right is slightly behind the front of the one on the left.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>tree_waypoint</code><span class='kind'>LANDMARK</span></div><p>tree on the way to the destination</p></li><li><div><code>parked_cars_line</code><span class='kind'>BOUNDARY</span></div><p>line of parked cars</p></li><li><div><code>goal_buildings</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>pair of small buildings like garages, next to each other, front of right one slightly behind left one</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e2</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=tree_waypoint (tree on the way to the destination) · relation=up to the tree</p></li><li><span class='event-index'>e3</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 270.0° / 9:00 / left</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 180.0° / 6:00 / turn around</p></li><li><span class='event-index'>e5</span><span class='event-type'>PASS</span><span class='event-turn'>T5</span><p>entity=parked_cars_line (line of parked cars) · relation=on your right</p></li><li><span class='event-index'>e6</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=goal_buildings (pair of small buildings like garages, next to each other, front of right one slightly behind left one) · relation=move to the final point</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2518__1&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 205.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;tree_waypoint&quot;,
+      &quot;description&quot;: &quot;tree on the way to the destination&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;parked_cars_line&quot;,
+      &quot;description&quot;: &quot;line of parked cars&quot;,
+      &quot;kind&quot;: &quot;BOUNDARY&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_buildings&quot;,
+      &quot;description&quot;: &quot;pair of small buildings like garages, next to each other, front of right one slightly behind left one&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;tree_waypoint&quot;,
+      &quot;relation&quot;: &quot;up to the tree&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;clock&quot;: &quot;9:00&quot;,
+        &quot;description&quot;: &quot;left&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;,
+        &quot;description&quot;: &quot;turn around&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;parked_cars_line&quot;,
+      &quot;relation&quot;: &quot;on your right&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_buildings&quot;,
+      &quot;relation&quot;: &quot;move to the final point&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="579__1 [ins] the i drone head east until you reach the road, after passing the destination is a house. [que] i see some containers pass the road. is the destination in my view? which direction should i go?. [ins] yes, the destination is in your view. you should turn to 8 o&#x27;clock and move forward to reach the destination. road some containers house pass reach turn" data-repaired="false" data-types="PASS REACH TURN" open>
+  <summary>
+    <span class="route-number">02</span>
+    <strong>579__1</strong>
+    <span>3 turns</span><span>3 entities</span><span>5 events</span>
+    <span>start heading=21.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>The I Drone head east until you reach the road, after passing the destination is a house.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see some containers pass the road. Is the destination in my view? Which direction should I go?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Yes, the destination is in your view. You should turn to 8 o&#x27;clock and move forward to reach the destination.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>road</code><span class='kind'>BOUNDARY</span></div><p>road</p></li><li><div><code>containers</code><span class='kind'>LANDMARK</span></div><p>some containers</p></li><li><div><code>goal_house</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>house</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 90.0° / east</p></li><li><span class='event-index'>e2</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=road (road) · relation=reach the road</p></li><li><span class='event-index'>e3</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=road (road) · relation=pass the road</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 240.0° / 8:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=goal_house (house) · relation=reach the destination</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;579__1&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 21.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;road&quot;,
+      &quot;description&quot;: &quot;road&quot;,
+      &quot;kind&quot;: &quot;BOUNDARY&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;containers&quot;,
+      &quot;description&quot;: &quot;some containers&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_house&quot;,
+      &quot;description&quot;: &quot;house&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;description&quot;: &quot;east&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;road&quot;,
+      &quot;relation&quot;: &quot;reach the road&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;road&quot;,
+      &quot;relation&quot;: &quot;pass the road&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 240.0,
+        &quot;clock&quot;: &quot;8:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_house&quot;,
+      &quot;relation&quot;: &quot;reach the destination&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2552__9 [ins] go to the forward direction then cross the road and trees then reached destination of the parking area. [que] i see multiple parking lots. am i near the destination? where should i go now?. [ins] move towards 9 o&#x27;clock direction, black colored place is your destination. [que] i see some black buildings. is the destination in my view? where should i go now? what is destination&#x27;s color and shape?. [ins] no, the destination is not in your view. move towards your 6 o&#x27;clock. the destination is a long shaped structure with dark top. road and trees parking area mentioned in turn 1 black colored place long shaped structure with dark top move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">03</span>
+    <strong>2552__9</strong>
+    <span>5 turns</span><span>4 entities</span><span>7 events</span>
+    <span>start heading=258.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Go to the forward direction then cross the road and trees then reached destination of the parking area.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see multiple parking lots. Am I near the destination? Where should I go now?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Move towards 9 o&#x27;clock direction, black colored place is your destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I see some black buildings. Is the destination in my view? Where should I go now? What is destination&#x27;s color and shape?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>No, the destination is not in your view. Move towards your 6 o&#x27;clock. The destination is a long shaped structure with dark top.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>road_and_trees</code><span class='kind'>LANDMARK</span></div><p>road and trees</p></li><li><div><code>initial_parking_area</code><span class='kind'>REGION</span></div><p>parking area mentioned in turn 1</p></li><li><div><code>black_place</code><span class='kind'>REGION</span></div><p>black colored place</p></li><li><div><code>final_destination</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>long shaped structure with dark top</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 0.0° / 12:00 / forward</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=road_and_trees (road and trees) · relation=cross</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=initial_parking_area (parking area mentioned in turn 1) · relation=arrive at parking area</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 270.0° / 9:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=final_destination (long shaped structure with dark top) · relation=reach the long shaped structure</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2552__9&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 258.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;road_and_trees&quot;,
+      &quot;description&quot;: &quot;road and trees&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;initial_parking_area&quot;,
+      &quot;description&quot;: &quot;parking area mentioned in turn 1&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;black_place&quot;,
+      &quot;description&quot;: &quot;black colored place&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;final_destination&quot;,
+      &quot;description&quot;: &quot;long shaped structure with dark top&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 0.0,
+        &quot;clock&quot;: &quot;12:00&quot;,
+        &quot;description&quot;: &quot;forward&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;road_and_trees&quot;,
+      &quot;relation&quot;: &quot;cross&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;initial_parking_area&quot;,
+      &quot;relation&quot;: &quot;arrive at parking area&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;clock&quot;: &quot;9:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;final_destination&quot;,
+      &quot;relation&quot;: &quot;reach the long shaped structure&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1913__12 [ins] turn left, go straight, turn right, go straight to reach your destination. [que] i turned left and go straight. when to turn right? where should i go now?. [ins] travel in the same direction until you pass a group of buildings with a red roof. turn left there to reach the destination. [que] i turned left after reaching red roof. am i near the destination? what is destination&#x27;s color and shape? how to go to destinaton?. [ins] yes you are near the destination. the destination color is grey color rectangle shaped house building. you may use clock position and you should go in 5 o&#x27;clock direction. the destination is dark grey building. [que] i see the dark gray building. is the destination in my view? what is destination&#x27;s color and shape? where should i go now? . [ins] no it is not. the destination looks like a rectangular gray warehouses and clearing area.  in order to reach your destination you should turn back 180 degrees and move straight forward in north direction. group of buildings with a red roof dark grey building (initially mistaken for destination) rectangular gray warehouses and clearing area move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">04</span>
+    <strong>1913__12</strong>
+    <span>7 turns</span><span>3 entities</span><span>9 events</span>
+    <span>start heading=210.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Turn left, go straight, turn right, go straight to reach your destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I turned left and go straight. When to turn right? Where should I go now?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Travel in the same direction until you pass a group of buildings with a red roof. Turn left there to reach the destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I turned left after reaching red roof. Am I near the destination? What is destination&#x27;s color and shape? How to go to destinaton?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>Yes you are near the destination. The destination color is grey color rectangle shaped house building. You may use clock position and you should go in 5 o&#x27;clock direction. The destination is dark grey building.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T6</span><p>I see the dark gray building. Is the destination in my view? What is destination&#x27;s color and shape? Where should I go now? .</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T7</span><p>No it is not. The destination looks like a rectangular gray warehouses and clearing area.  In order to reach your destination you should turn back 180 degrees and move straight forward in north direction.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>red_roof_buildings</code><span class='kind'>LANDMARK</span></div><p>group of buildings with a red roof</p></li><li><div><code>dark_grey_building</code><span class='kind'>LANDMARK</span></div><p>dark grey building (initially mistaken for destination)</p></li><li><div><code>goal_warehouses</code><span class='kind'>REGION</span><span class='goal'>GOAL</span></div><p>rectangular gray warehouses and clearing area</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 270.0° / 9:00 / left</p></li><li><span class='event-index'>e2</span><span class='event-type'>MOVE</span><span class='event-turn'>T1</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e3</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 90.0° / 3:00 / right</p></li><li><span class='event-index'>e4</span><span class='event-type'>PASS</span><span class='event-turn'>T3</span><p>entity=red_roof_buildings (group of buildings with a red roof) · relation=pass</p></li><li><span class='event-index'>e5</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 270.0° / 9:00 / left</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 150.0° / 5:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=dark_grey_building (dark grey building (initially mistaken for destination)) · relation=reach</p></li><li><span class='event-index'>e8</span><span class='event-type'>TURN</span><span class='event-turn'>T7</span><p>direction=absolute 0.0° / north / turn back 180 degrees</p></li><li><span class='event-index'>e9</span><span class='event-type'>REACH</span><span class='event-turn'>T7</span><p>entity=goal_warehouses (rectangular gray warehouses and clearing area) · relation=move straight forward to reach</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1913__12&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 210.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;red_roof_buildings&quot;,
+      &quot;description&quot;: &quot;group of buildings with a red roof&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;dark_grey_building&quot;,
+      &quot;description&quot;: &quot;dark grey building (initially mistaken for destination)&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_warehouses&quot;,
+      &quot;description&quot;: &quot;rectangular gray warehouses and clearing area&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;clock&quot;: &quot;9:00&quot;,
+        &quot;description&quot;: &quot;left&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;clock&quot;: &quot;3:00&quot;,
+        &quot;description&quot;: &quot;right&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;red_roof_buildings&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;clock&quot;: &quot;9:00&quot;,
+        &quot;description&quot;: &quot;left&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 150.0,
+        &quot;clock&quot;: &quot;5:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;dark_grey_building&quot;,
+      &quot;relation&quot;: &quot;reach&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 0.0,
+        &quot;description&quot;: &quot;north / turn back 180 degrees&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e9&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_warehouses&quot;,
+      &quot;relation&quot;: &quot;move straight forward to reach&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2618__5 [ins] destination is a row of mostly blue storage trailers at your one o&#x27;clock direction at the other side of the sandy parking lot. [que] i am on the sand, is the destination in my view? how to go to destinaton?. [ins] in the current position it is not possible to see the destination, go south and you will find the destination. sandy parking lot row of mostly blue storage trailers at the other side of the sandy parking lot reach turn" data-repaired="false" data-types="REACH TURN">
+  <summary>
+    <span class="route-number">05</span>
+    <strong>2618__5</strong>
+    <span>3 turns</span><span>2 entities</span><span>2 events</span>
+    <span>start heading=149.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Destination is a row of mostly blue storage trailers at your one o&#x27;clock direction at the other side of the sandy parking lot.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am on the sand, Is the destination in my view? How to go to destinaton?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>In the current position it is not possible to see the destination, go south and you will find the destination.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>sandy_parking_lot</code><span class='kind'>REGION</span></div><p>sandy parking lot</p></li><li><div><code>blue_storage_trailers</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>row of mostly blue storage trailers at the other side of the sandy parking lot</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=absolute 180.0° / south</p></li><li><span class='event-index'>e2</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=blue_storage_trailers (row of mostly blue storage trailers at the other side of the sandy parking lot) · relation=at the other side of the sandy parking lot · spatial=initially described at relative 1:00 from start; located south of current position on sand</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2618__5&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 149.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;sandy_parking_lot&quot;,
+      &quot;description&quot;: &quot;sandy parking lot&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;blue_storage_trailers&quot;,
+      &quot;description&quot;: &quot;row of mostly blue storage trailers at the other side of the sandy parking lot&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;south&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;blue_storage_trailers&quot;,
+      &quot;relation&quot;: &quot;at the other side of the sandy parking lot&quot;,
+      &quot;spatial_constraints&quot;: [
+        &quot;initially described at relative 1:00 from start&quot;,
+        &quot;located south of current position on sand&quot;
+      ]
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2552__11 [ins] drone reverse immediately toward your 6 o&#x27;clock. cross over a large red building. look for a long silver roofed shed just on the other side of a paved road. this is your destination. [que] i see some large silver buildings. is the destination in my view? what is the destination look like?. [ins] turn back go forward turn right from green grass feild go forward long grey building near end of grass field is your goal. [que] i see the long gray building at the end of the grass field. can i see the destination? i am a liitle confused by the instruction. what should i do now. . [ins] yes, fate is in the field of vision. go in the 6 o&#x27;clock direction from your current position. large red building paved road long silver roofed shed just on the other side of a paved road green grass field long grey building near end of grass field move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">06</span>
+    <strong>2552__11</strong>
+    <span>5 turns</span><span>5 entities</span><span>10 events</span>
+    <span>start heading=78.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Drone reverse immediately toward your 6 o&#x27;clock. Cross over a large red building. Look for a long silver roofed shed just on the other side of a paved road. This is your destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see some large silver buildings. Is the destination in my view? What is the destination look like?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>turn back go forward turn right from green grass feild go forward long grey building near end of grass field is your goal.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I see the long gray building at the end of the grass field. Can I see the destination? I am a liitle confused by the instruction. What should I do now. .</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>Yes, fate is in the field of vision. Go in the 6 o&#x27;clock direction from your current position.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>red_building</code><span class='kind'>LANDMARK</span></div><p>large red building</p></li><li><div><code>paved_road</code><span class='kind'>BOUNDARY</span></div><p>paved road</p></li><li><div><code>silver_shed_initial</code><span class='kind'>LANDMARK</span></div><p>long silver roofed shed just on the other side of a paved road</p></li><li><div><code>green_grass_field</code><span class='kind'>REGION</span></div><p>green grass field</p></li><li><div><code>goal_grey_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>long grey building near end of grass field</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=red_building (large red building) · relation=over</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=silver_shed_initial (long silver roofed shed just on the other side of a paved road) · relation=just on the other side of a paved road · spatial=across the paved road from the red building</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 180.0° / turn back</p></li><li><span class='event-index'>e5</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 90.0° / right</p></li><li><span class='event-index'>e7</span><span class='event-type'>PASS</span><span class='event-turn'>T3</span><p>entity=green_grass_field (green grass field) · relation=along</p></li><li><span class='event-index'>e8</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=goal_grey_building (long grey building near end of grass field) · relation=near end of grass field</p></li><li><span class='event-index'>e9</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e10</span><span class='event-type'>MOVE</span><span class='event-turn'>T5</span><p>distance=limited_unspecified</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2552__11&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 78.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;red_building&quot;,
+      &quot;description&quot;: &quot;large red building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;paved_road&quot;,
+      &quot;description&quot;: &quot;paved road&quot;,
+      &quot;kind&quot;: &quot;BOUNDARY&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;silver_shed_initial&quot;,
+      &quot;description&quot;: &quot;long silver roofed shed just on the other side of a paved road&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;green_grass_field&quot;,
+      &quot;description&quot;: &quot;green grass field&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_grey_building&quot;,
+      &quot;description&quot;: &quot;long grey building near end of grass field&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;red_building&quot;,
+      &quot;relation&quot;: &quot;over&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;silver_shed_initial&quot;,
+      &quot;relation&quot;: &quot;just on the other side of a paved road&quot;,
+      &quot;spatial_constraints&quot;: [
+        &quot;across the paved road from the red building&quot;
+      ]
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;turn back&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;description&quot;: &quot;right&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;green_grass_field&quot;,
+      &quot;relation&quot;: &quot;along&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_grey_building&quot;,
+      &quot;relation&quot;: &quot;near end of grass field&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e9&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e10&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2384__11 [ins] reverse directions toward your 6 o&#x27;clock. pass two single gray roofed units and land on the row of five gray roofed building units. [que] i see multiple buildings. can i see the destination? in what direction is our destination?. [ins] hey drone, go 1 o&#x27;clock, and your destination will the large structure with five white roofs. two single gray roofed units row of five gray roofed building units large structure with five white roofs pass reach turn" data-repaired="false" data-types="PASS REACH TURN">
+  <summary>
+    <span class="route-number">07</span>
+    <strong>2384__11</strong>
+    <span>3 turns</span><span>3 entities</span><span>5 events</span>
+    <span>start heading=139.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Reverse directions toward your 6 o&#x27;clock. Pass two single gray roofed units and land on the row of five gray roofed building units.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see multiple buildings. Can I see the destination? In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Hey drone, go 1 o&#x27;clock, and your destination will the large structure with five white roofs.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>two_gray_units</code><span class='kind'>LANDMARK</span></div><p>two single gray roofed units</p></li><li><div><code>five_gray_units</code><span class='kind'>LANDMARK</span></div><p>row of five gray roofed building units</p></li><li><div><code>goal_white_structure</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>large structure with five white roofs</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=two_gray_units (two single gray roofed units) · relation=pass two single gray roofed units</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=five_gray_units (row of five gray roofed building units) · relation=land on the row</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 30.0° / 1:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=goal_white_structure (large structure with five white roofs) · relation=destination is the large structure</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2384__11&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 139.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;two_gray_units&quot;,
+      &quot;description&quot;: &quot;two single gray roofed units&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;five_gray_units&quot;,
+      &quot;description&quot;: &quot;row of five gray roofed building units&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_white_structure&quot;,
+      &quot;description&quot;: &quot;large structure with five white roofs&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;two_gray_units&quot;,
+      &quot;relation&quot;: &quot;pass two single gray roofed units&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;five_gray_units&quot;,
+      &quot;relation&quot;: &quot;land on the row&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 30.0,
+        &quot;clock&quot;: &quot;1:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_white_structure&quot;,
+      &quot;relation&quot;: &quot;destination is the large structure&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1457__15 [ins] please turn 90 degree right towards southeast flying over huge building and the road junction. [que] which direction should i go? what is destination&#x27;s color and shape?. [ins] go in the 4 o&#x27;clock direction from your current position.the destination is a rectangular gray building. [que] how large is the building? where should i go now? what is the destination look like?. [ins] the building is about the same size as the one you are on right now. move towards your 8 o&#x27;clock direction. the destination looks like a tall mostly white building with blue accents. huge building road junction rectangular gray building tall mostly white building with blue accents pass reach turn" data-repaired="false" data-types="PASS REACH TURN">
+  <summary>
+    <span class="route-number">08</span>
+    <strong>1457__15</strong>
+    <span>5 turns</span><span>4 entities</span><span>7 events</span>
+    <span>start heading=25.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Please turn 90 degree right towards southeast flying over huge building and the road junction.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>Which direction should I go? What is destination&#x27;s color and shape?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Go in the 4 o&#x27;clock direction from your current position.The destination is a rectangular gray building.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>How large is the building? Where should I go now? What is the destination look like?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>The building is about the same size as the one you are on right now. Move towards your 8 o&#x27;clock direction. The destination looks like a tall mostly white building with blue accents.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>huge_building</code><span class='kind'>LANDMARK</span></div><p>huge building</p></li><li><div><code>road_junction</code><span class='kind'>LANDMARK</span></div><p>road junction</p></li><li><div><code>rectangular_gray_building</code><span class='kind'>LANDMARK</span></div><p>rectangular gray building</p></li><li><div><code>tall_white_blue_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>tall mostly white building with blue accents</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 90.0° / 3:00 / right towards southeast</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=huge_building (huge building) · relation=over</p></li><li><span class='event-index'>e3</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=road_junction (road junction) · relation=over</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 120.0° / 4:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=rectangular_gray_building (rectangular gray building)</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 240.0° / 8:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=tall_white_blue_building (tall mostly white building with blue accents)</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1457__15&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 25.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;huge_building&quot;,
+      &quot;description&quot;: &quot;huge building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;road_junction&quot;,
+      &quot;description&quot;: &quot;road junction&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;rectangular_gray_building&quot;,
+      &quot;description&quot;: &quot;rectangular gray building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;tall_white_blue_building&quot;,
+      &quot;description&quot;: &quot;tall mostly white building with blue accents&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;clock&quot;: &quot;3:00&quot;,
+        &quot;description&quot;: &quot;right towards southeast&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;huge_building&quot;,
+      &quot;relation&quot;: &quot;over&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;road_junction&quot;,
+      &quot;relation&quot;: &quot;over&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 120.0,
+        &quot;clock&quot;: &quot;4:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;rectangular_gray_building&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 240.0,
+        &quot;clock&quot;: &quot;8:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;tall_white_blue_building&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1468__1 [ins] hi drone, head south and after passing the first street your destination is the corner building. [que] i am on the building near the street, can i see the destination? how to go to destinaton?. [ins] change  to the 45degree right and move straight to reach the destination. [que] i move to right on the buildings, is the destination in my view? which direction should i go?. [ins] move towards 6 o&#x27;clock direction, your destination is a third brown color building with white color in left. [que] i move back and on the brown building with white color left, what is destination&#x27;s color and shape? in what direction is our destination?. [ins] the destination looks like a rectangular square brown roof house.  in order to reach your destination you should  move straight forward a couple of meters. the first street encountered when heading south corner building initially identified as destination third brown color building with white color in left rectangular square brown roof house move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">09</span>
+    <strong>1468__1</strong>
+    <span>7 turns</span><span>4 entities</span><span>9 events</span>
+    <span>start heading=171.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hi drone, head south and after passing the first street your destination is the corner building.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am on the building near the street, Can I see the destination? How to go to destinaton?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>change  to the 45degree right and move straight to reach the destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I move to right on the buildings, Is the destination in my view? Which direction should I go?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>Move towards 6 o&#x27;clock direction, your destination is a third brown color building with white color in left.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T6</span><p>I move back and on the brown building with white color left, What is destination&#x27;s color and shape? In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T7</span><p>The destination looks like a rectangular square brown roof house.  In order to reach your destination you should  move straight forward a couple of meters.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>first_street</code><span class='kind'>BOUNDARY</span></div><p>the first street encountered when heading south</p></li><li><div><code>corner_building_intermediate</code><span class='kind'>LANDMARK</span></div><p>corner building initially identified as destination</p></li><li><div><code>brown_white_building</code><span class='kind'>LANDMARK</span></div><p>third brown color building with white color in left</p></li><li><div><code>final_destination_house</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>rectangular square brown roof house</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 180.0° / south</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=first_street (the first street encountered when heading south) · relation=pass the first street</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=corner_building_intermediate (corner building initially identified as destination) · relation=arrive at the corner building</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 45.0° / 45 degrees right</p></li><li><span class='event-index'>e5</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=brown_white_building (third brown color building with white color in left) · relation=reach the third brown building with white on left</p></li><li><span class='event-index'>e8</span><span class='event-type'>MOVE</span><span class='event-turn'>T7</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e9</span><span class='event-type'>REACH</span><span class='event-turn'>T7</span><p>entity=final_destination_house (rectangular square brown roof house) · relation=reach the rectangular square brown roof house</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1468__1&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 171.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;first_street&quot;,
+      &quot;description&quot;: &quot;the first street encountered when heading south&quot;,
+      &quot;kind&quot;: &quot;BOUNDARY&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;corner_building_intermediate&quot;,
+      &quot;description&quot;: &quot;corner building initially identified as destination&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;brown_white_building&quot;,
+      &quot;description&quot;: &quot;third brown color building with white color in left&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;final_destination_house&quot;,
+      &quot;description&quot;: &quot;rectangular square brown roof house&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;south&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;first_street&quot;,
+      &quot;relation&quot;: &quot;pass the first street&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;corner_building_intermediate&quot;,
+      &quot;relation&quot;: &quot;arrive at the corner building&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 45.0,
+        &quot;description&quot;: &quot;45 degrees right&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;brown_white_building&quot;,
+      &quot;relation&quot;: &quot;reach the third brown building with white on left&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e9&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;final_destination_house&quot;,
+      &quot;relation&quot;: &quot;reach the rectangular square brown roof house&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1106__0 [ins] hey drone, turn a little to the right, go straight, go past the streets, go straight again, go south until you reach the fourth building. [que] i am over the street, can i see the destination? how to go to destinaton?. [ins] yes, fate is in your field of vision. go in the 2 o&#x27;clock direction from your current position. [que] i move 2 o clock and on the building near the road, what is the destination look like? how to go to destinaton?. [ins] a flat black house. turn around then go forward. [que] i turn around on the flat building, what is the destination look like? in what direction is our destination?. [ins] destination looks like a very small black building in the middle of the train tracks. go to your seven o&#x27;clock. streets to go past the fourth building reached after going south a flat black house near the road train tracks containing the destination very small black building in the middle of the train tracks move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">10</span>
+    <strong>1106__0</strong>
+    <span>7 turns</span><span>5 entities</span><span>12 events</span>
+    <span>start heading=58.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hey drone, turn a little to the right, go straight, go past the streets, go straight again, go south until you reach the fourth building.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am over the street, Can I see the destination? How to go to destinaton?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Yes, fate is in your field of vision. Go in the 2 o&#x27;clock direction from your current position.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I move 2 o clock and on the building near the road, What is the destination look like? How to go to destinaton?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>A flat black house. Turn around then go forward.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T6</span><p>I turn around on the flat building, What is the destination look like? In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T7</span><p>Destination looks like a very small black building in the middle of the train tracks. Go to your seven o&#x27;clock.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>streets</code><span class='kind'>CORRIDOR</span></div><p>streets to go past</p></li><li><div><code>fourth_building</code><span class='kind'>LANDMARK</span></div><p>the fourth building reached after going south</p></li><li><div><code>flat_black_house</code><span class='kind'>LANDMARK</span></div><p>a flat black house near the road</p></li><li><div><code>train_tracks</code><span class='kind'>CORRIDOR</span></div><p>train tracks containing the destination</p></li><li><div><code>goal_small_black_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>very small black building in the middle of the train tracks</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 45.0° / a little to the right</p></li><li><span class='event-index'>e2</span><span class='event-type'>MOVE</span><span class='event-turn'>T1</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e3</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=streets (streets to go past) · relation=go past</p></li><li><span class='event-index'>e4</span><span class='event-type'>MOVE</span><span class='event-turn'>T1</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e5</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 180.0° / south</p></li><li><span class='event-index'>e6</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=fourth_building (the fourth building reached after going south) · relation=reach the fourth building</p></li><li><span class='event-index'>e7</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 60.0° / 2:00</p></li><li><span class='event-index'>e8</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=flat_black_house (a flat black house near the road) · relation=on the building near the road</p></li><li><span class='event-index'>e9</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 180.0° / turn around</p></li><li><span class='event-index'>e10</span><span class='event-type'>MOVE</span><span class='event-turn'>T5</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e11</span><span class='event-type'>TURN</span><span class='event-turn'>T7</span><p>direction=relative 210.0° / 7:00</p></li><li><span class='event-index'>e12</span><span class='event-type'>REACH</span><span class='event-turn'>T7</span><p>entity=goal_small_black_building (very small black building in the middle of the train tracks) · relation=in the middle of the train tracks · spatial=located within train tracks</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1106__0&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 58.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;streets&quot;,
+      &quot;description&quot;: &quot;streets to go past&quot;,
+      &quot;kind&quot;: &quot;CORRIDOR&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;fourth_building&quot;,
+      &quot;description&quot;: &quot;the fourth building reached after going south&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;flat_black_house&quot;,
+      &quot;description&quot;: &quot;a flat black house near the road&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;train_tracks&quot;,
+      &quot;description&quot;: &quot;train tracks containing the destination&quot;,
+      &quot;kind&quot;: &quot;CORRIDOR&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_small_black_building&quot;,
+      &quot;description&quot;: &quot;very small black building in the middle of the train tracks&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 45.0,
+        &quot;description&quot;: &quot;a little to the right&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;streets&quot;,
+      &quot;relation&quot;: &quot;go past&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;south&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;fourth_building&quot;,
+      &quot;relation&quot;: &quot;reach the fourth building&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 60.0,
+        &quot;clock&quot;: &quot;2:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;flat_black_house&quot;,
+      &quot;relation&quot;: &quot;on the building near the road&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e9&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;turn around&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e10&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e11&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 210.0,
+        &quot;clock&quot;: &quot;7:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e12&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_small_black_building&quot;,
+      &quot;relation&quot;: &quot;in the middle of the train tracks&quot;,
+      &quot;spatial_constraints&quot;: [
+        &quot;located within train tracks&quot;
+      ]
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="561__1 [ins] go straight and turn left and go straight and turn right , the grey color building is your destination. [que] where should i go now? what is destination&#x27;s color and shape?. [ins] go in the 4 o&#x27;clock direction from your current position. the destination is a white square building. grey color building white square building move reach turn" data-repaired="false" data-types="MOVE REACH TURN">
+  <summary>
+    <span class="route-number">11</span>
+    <strong>561__1</strong>
+    <span>3 turns</span><span>2 entities</span><span>7 events</span>
+    <span>start heading=113.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Go straight and turn left and go straight and turn right , the grey color building is your destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>Where should I go now? What is destination&#x27;s color and shape?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Go in the 4 o&#x27;clock direction from your current position. The destination is a white square building.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>grey_building</code><span class='kind'>LANDMARK</span></div><p>grey color building</p></li><li><div><code>white_square_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>white square building</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>MOVE</span><span class='event-turn'>T1</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e2</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 270.0° / left</p></li><li><span class='event-index'>e3</span><span class='event-type'>MOVE</span><span class='event-turn'>T1</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 90.0° / right</p></li><li><span class='event-index'>e5</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=grey_building (grey color building)</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 120.0° / 4:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=white_square_building (white square building)</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;561__1&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 113.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;grey_building&quot;,
+      &quot;description&quot;: &quot;grey color building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;white_square_building&quot;,
+      &quot;description&quot;: &quot;white square building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;description&quot;: &quot;left&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;description&quot;: &quot;right&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;grey_building&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 120.0,
+        &quot;clock&quot;: &quot;4:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;white_square_building&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2398__6 [ins] rotate 180 degrees to six o&#x27;clock. head forwards to next set of buildings. pass the and stop. turn north and fly to first buildings that are partially bordered to the southern and western edges. stop. next set of buildings first buildings that are partially bordered to the southern and western edges pass reach turn" data-repaired="false" data-types="PASS REACH TURN">
+  <summary>
+    <span class="route-number">12</span>
+    <strong>2398__6</strong>
+    <span>1 turns</span><span>2 entities</span><span>4 events</span>
+    <span>start heading=107.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Rotate 180 degrees to six o&#x27;clock. Head forwards to next set of buildings. Pass the and stop. Turn North and fly to first buildings that are partially bordered to the southern and western edges. Stop.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>next_buildings</code><span class='kind'>LANDMARK</span></div><p>next set of buildings</p></li><li><div><code>first_buildings</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>first buildings that are partially bordered to the southern and western edges</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=next_buildings (next set of buildings) · relation=pass</p></li><li><span class='event-index'>e3</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 0.0° / north</p></li><li><span class='event-index'>e4</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=first_buildings (first buildings that are partially bordered to the southern and western edges) · spatial=partially bordered to the southern and western edges</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2398__6&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 107.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;next_buildings&quot;,
+      &quot;description&quot;: &quot;next set of buildings&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;first_buildings&quot;,
+      &quot;description&quot;: &quot;first buildings that are partially bordered to the southern and western edges&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;next_buildings&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 0.0,
+        &quot;description&quot;: &quot;north&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;first_buildings&quot;,
+      &quot;spatial_constraints&quot;: [
+        &quot;partially bordered to the southern and western edges&quot;
+      ]
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1466__4 [ins] hi drone, turn backwards and head east and your destination is the triangular area. [que] i am on top of triangular buildings, is the destination in my view? in what direction is our destination?. [ins] no, the destination not in your view, the destination on your 2 o&#x27;clock direction. triangular buildings triangular area move reach turn" data-repaired="false" data-types="MOVE REACH TURN">
+  <summary>
+    <span class="route-number">13</span>
+    <strong>1466__4</strong>
+    <span>3 turns</span><span>2 entities</span><span>6 events</span>
+    <span>start heading=294.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hi drone, turn backwards and head east and your destination is the triangular area.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am on top of triangular buildings, Is the destination in my view? In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>No, the destination not in your view, the destination on your 2 o&#x27;clock direction.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>triangular_buildings</code><span class='kind'>LANDMARK</span></div><p>triangular buildings</p></li><li><div><code>goal_triangular_area</code><span class='kind'>REGION</span><span class='goal'>GOAL</span></div><p>triangular area</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 180.0° / backwards</p></li><li><span class='event-index'>e2</span><span class='event-type'>MOVE</span><span class='event-turn'>T1</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e3</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 90.0° / east</p></li><li><span class='event-index'>e4</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=triangular_buildings (triangular buildings) · relation=on top of</p></li><li><span class='event-index'>e5</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 60.0° / 2:00</p></li><li><span class='event-index'>e6</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=goal_triangular_area (triangular area)</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1466__4&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 294.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;triangular_buildings&quot;,
+      &quot;description&quot;: &quot;triangular buildings&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_triangular_area&quot;,
+      &quot;description&quot;: &quot;triangular area&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;backwards&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;description&quot;: &quot;east&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;triangular_buildings&quot;,
+      &quot;relation&quot;: &quot;on top of&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 60.0,
+        &quot;clock&quot;: &quot;2:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_triangular_area&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="5__2 [ins] hey drone, head southwest, pass the docks and head to the building with a gray roof that has a small building attached to the side, this is the destination. [que] i am on the grey building, can i see the destination? which direction should i go?. [ins] no, you can&#x27;t see the destination. you have to turn to 11 o&#x27;clock and move forward to arrive at the destination. [que] i move forward, $des how to go to destinaton?. [ins] turn 11&#x27;0 clock go toward this frist  grey building on your way is your destination. docks building with a gray roof that has a small building attached to the side (initially identified as destination) first grey building on the way after turning 11 o&#x27;clock move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">14</span>
+    <strong>5__2</strong>
+    <span>5 turns</span><span>3 entities</span><span>7 events</span>
+    <span>start heading=326.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hey drone, head southwest, pass the docks and head to the building with a gray roof that has a small building attached to the side, this is the destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am on the grey building, Can I see the destination? Which direction should I go?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>No, you can&#x27;t see the destination. You have to turn to 11 o&#x27;clock and move forward to arrive at the destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I move forward, $des How to go to destinaton?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>turn 11&#x27;0 clock go toward this frist  grey building on your way is your destination.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>docks</code><span class='kind'>LANDMARK</span></div><p>docks</p></li><li><div><code>grey_building_intermediate</code><span class='kind'>LANDMARK</span></div><p>building with a gray roof that has a small building attached to the side (initially identified as destination)</p></li><li><div><code>goal_grey_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>first grey building on the way after turning 11 o&#x27;clock</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 225.0° / southwest</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=docks (docks) · relation=pass</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=grey_building_intermediate (building with a gray roof that has a small building attached to the side (initially identified as destination)) · relation=arrive at</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 330.0° / 11:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 330.0° / 11:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=goal_grey_building (first grey building on the way after turning 11 o&#x27;clock) · relation=reach the first grey building</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;5__2&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 326.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;docks&quot;,
+      &quot;description&quot;: &quot;docks&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;grey_building_intermediate&quot;,
+      &quot;description&quot;: &quot;building with a gray roof that has a small building attached to the side (initially identified as destination)&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_grey_building&quot;,
+      &quot;description&quot;: &quot;first grey building on the way after turning 11 o&#x27;clock&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 225.0,
+        &quot;description&quot;: &quot;southwest&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;docks&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;grey_building_intermediate&quot;,
+      &quot;relation&quot;: &quot;arrive at&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 330.0,
+        &quot;clock&quot;: &quot;11:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 330.0,
+        &quot;clock&quot;: &quot;11:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_grey_building&quot;,
+      &quot;relation&quot;: &quot;reach the first grey building&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2398__4 [ins] please turn towards right side and head towards north west continue flying crossing car parking lot. [que] i am near the parking lot, am i near the destination? where should i go now?. [ins] yes, fate is in your field of vision.you have arrived at your destination. car parking lot reach turn" data-repaired="true" data-types="REACH TURN">
+  <summary>
+    <span class="route-number">15</span>
+    <strong>2398__4</strong>
+    <span>3 turns</span><span>1 entities</span><span>3 events</span>
+    <span>start heading=269.0°</span>
+    <span class="repair yes">repaired=true</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Please turn towards right side and head towards North West continue flying crossing car parking lot.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am near the parking lot, Am I near the destination? Where should I go now?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Yes, fate is in your field of vision.You have arrived at your destination.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>car_parking_lot</code><span class='kind'>REGION</span><span class='goal'>GOAL</span></div><p>car parking lot</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 90.0° / 3:00 / right side</p></li><li><span class='event-index'>e2</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 315.0° / north west</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=car_parking_lot (car parking lot) · relation=crossing</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2398__4&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 269.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;car_parking_lot&quot;,
+      &quot;description&quot;: &quot;car parking lot&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;clock&quot;: &quot;3:00&quot;,
+        &quot;description&quot;: &quot;right side&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 315.0,
+        &quot;description&quot;: &quot;north west&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;car_parking_lot&quot;,
+      &quot;relation&quot;: &quot;crossing&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1914__2 [ins] hey drone, head northwest, go through the four blocks and head to the building on the right, this is the destination. [que] i am on the street after some blocks, am i near the destination? in what direction is our destination?. [ins] hi drone. after passing the building blocks in 1&#x27;o clock direction. your destination is a gra&#x27;y color building surrounded by other buildings. [que] i am onthe grey building, what is the destination look like? in what direction is our destination?. [ins] move forward till you find a swimming pool. keep moving forward till you find a hip and gable roofed house with adjoining pool, the house is our destination. [que] i am on the building at forward next to the pool, how does the destination look like? where should i go now?. [ins] the destination is a larger house with light brown roof. move towards your 1 o&#x27;clock direction. you will fly over an intersection. the destination is the first building across the intersection. four blocks grey color building surrounded by other buildings swimming pool hip and gable roofed house with adjoining pool intersection larger house with light brown roof, first building across the intersection move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">16</span>
+    <strong>1914__2</strong>
+    <span>7 turns</span><span>6 entities</span><span>11 events</span>
+    <span>start heading=41.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hey drone, head northwest, go through the four blocks and head to the building on the right, this is the destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I am on the street after some blocks, Am I near the destination? In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Hi drone. after passing the building blocks in 1&#x27;o clock direction. Your destination is a gra&#x27;y color building surrounded by other buildings.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I am onthe grey building, What is the destination look like? In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>Move forward till you find a swimming pool. Keep moving forward till you find a hip and gable roofed house with adjoining pool, the house is our destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T6</span><p>I am on the building at forward next to the pool, How does the destination look like? Where should I go now?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T7</span><p>The destination is a larger house with light brown roof. Move towards your 1 o&#x27;clock direction. You will fly over an intersection. The destination is the first building across the intersection.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>four_blocks</code><span class='kind'>REGION</span></div><p>four blocks</p></li><li><div><code>grey_building</code><span class='kind'>LANDMARK</span></div><p>grey color building surrounded by other buildings</p></li><li><div><code>swimming_pool</code><span class='kind'>LANDMARK</span></div><p>swimming pool</p></li><li><div><code>hip_gable_house</code><span class='kind'>LANDMARK</span></div><p>hip and gable roofed house with adjoining pool</p></li><li><div><code>intersection</code><span class='kind'>LANDMARK</span></div><p>intersection</p></li><li><div><code>goal_house</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>larger house with light brown roof, first building across the intersection</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 315.0° / northwest</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=four_blocks (four blocks) · relation=through</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=grey_building (grey color building surrounded by other buildings) · relation=on the right</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 30.0° / 1:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e6</span><span class='event-type'>MOVE</span><span class='event-turn'>T5</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e7</span><span class='event-type'>PASS</span><span class='event-turn'>T5</span><p>entity=swimming_pool (swimming pool) · relation=find/pass</p></li><li><span class='event-index'>e8</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=hip_gable_house (hip and gable roofed house with adjoining pool) · relation=adjoining pool</p></li><li><span class='event-index'>e9</span><span class='event-type'>TURN</span><span class='event-turn'>T7</span><p>direction=relative 30.0° / 1:00</p></li><li><span class='event-index'>e10</span><span class='event-type'>PASS</span><span class='event-turn'>T7</span><p>entity=intersection (intersection) · relation=over</p></li><li><span class='event-index'>e11</span><span class='event-type'>REACH</span><span class='event-turn'>T7</span><p>entity=goal_house (larger house with light brown roof, first building across the intersection) · relation=first building across the intersection</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1914__2&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 41.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;four_blocks&quot;,
+      &quot;description&quot;: &quot;four blocks&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;grey_building&quot;,
+      &quot;description&quot;: &quot;grey color building surrounded by other buildings&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;swimming_pool&quot;,
+      &quot;description&quot;: &quot;swimming pool&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;hip_gable_house&quot;,
+      &quot;description&quot;: &quot;hip and gable roofed house with adjoining pool&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;intersection&quot;,
+      &quot;description&quot;: &quot;intersection&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_house&quot;,
+      &quot;description&quot;: &quot;larger house with light brown roof, first building across the intersection&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 315.0,
+        &quot;description&quot;: &quot;northwest&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;four_blocks&quot;,
+      &quot;relation&quot;: &quot;through&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;grey_building&quot;,
+      &quot;relation&quot;: &quot;on the right&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 30.0,
+        &quot;clock&quot;: &quot;1:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;swimming_pool&quot;,
+      &quot;relation&quot;: &quot;find/pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;hip_gable_house&quot;,
+      &quot;relation&quot;: &quot;adjoining pool&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e9&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 30.0,
+        &quot;clock&quot;: &quot;1:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e10&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;intersection&quot;,
+      &quot;relation&quot;: &quot;over&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e11&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_house&quot;,
+      &quot;relation&quot;: &quot;first building across the intersection&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2567__8 [ins] hi drone, head north and you will fly a portion of buildings and will pass over 2 streets and after passing the second one, your destination will be the grey roof building in the middle. [que] i didn&#x27;t see the grey roof. in what direction is our destination?. [ins] next to you at 9 o&#x27;clock. portion of buildings first street second street grey roof building in the middle pass reach turn" data-repaired="false" data-types="PASS REACH TURN">
+  <summary>
+    <span class="route-number">17</span>
+    <strong>2567__8</strong>
+    <span>3 turns</span><span>4 entities</span><span>6 events</span>
+    <span>start heading=176.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hi drone, head north and you will fly a portion of buildings and will pass over 2 streets and after passing the second one, your destination will be the grey roof building in the middle.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I didn&#x27;t see the grey roof. In what direction is our destination?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Next to you at 9 o&#x27;clock.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>buildings_portion</code><span class='kind'>REGION</span></div><p>portion of buildings</p></li><li><div><code>street_1</code><span class='kind'>CORRIDOR</span></div><p>first street</p></li><li><div><code>street_2</code><span class='kind'>CORRIDOR</span></div><p>second street</p></li><li><div><code>grey_roof_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>grey roof building in the middle</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 0.0° / north</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=buildings_portion (portion of buildings) · relation=fly over a portion of buildings</p></li><li><span class='event-index'>e3</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=street_1 (first street) · relation=pass over first street</p></li><li><span class='event-index'>e4</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=street_2 (second street) · relation=pass over second street</p></li><li><span class='event-index'>e5</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 270.0° / 9:00</p></li><li><span class='event-index'>e6</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=grey_roof_building (grey roof building in the middle) · relation=next to you at 9 o&#x27;clock</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2567__8&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 176.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;buildings_portion&quot;,
+      &quot;description&quot;: &quot;portion of buildings&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;street_1&quot;,
+      &quot;description&quot;: &quot;first street&quot;,
+      &quot;kind&quot;: &quot;CORRIDOR&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;street_2&quot;,
+      &quot;description&quot;: &quot;second street&quot;,
+      &quot;kind&quot;: &quot;CORRIDOR&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;grey_roof_building&quot;,
+      &quot;description&quot;: &quot;grey roof building in the middle&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 0.0,
+        &quot;description&quot;: &quot;north&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;buildings_portion&quot;,
+      &quot;relation&quot;: &quot;fly over a portion of buildings&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;street_1&quot;,
+      &quot;relation&quot;: &quot;pass over first street&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;street_2&quot;,
+      &quot;relation&quot;: &quot;pass over second street&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;clock&quot;: &quot;9:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;grey_roof_building&quot;,
+      &quot;relation&quot;: &quot;next to you at 9 o&#x27;clock&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1897__0 [ins] head forward towards2 o&#x27;clock direction. after passing a ground with trees in it, the destination is a gray colored building with a brick colored building in the right side. [que] i pass the trees, am i near the destination? which direction should i go?. [ins] yes, it is close to the destination. turn south. ground with trees in it gray colored building with a brick colored building in the right side pass reach turn" data-repaired="false" data-types="PASS REACH TURN">
+  <summary>
+    <span class="route-number">18</span>
+    <strong>1897__0</strong>
+    <span>3 turns</span><span>2 entities</span><span>4 events</span>
+    <span>start heading=356.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>head forward towards2 o&#x27;clock direction. After passing a ground with trees in it, the destination is a gray colored building with a brick colored building in the right side.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I pass the trees, Am I near the destination? Which direction should I go?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Yes, it is close to the destination. Turn south.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>tree_ground</code><span class='kind'>REGION</span></div><p>ground with trees in it</p></li><li><div><code>gray_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>gray colored building with a brick colored building in the right side</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 60.0° / 2:00</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=tree_ground (ground with trees in it) · relation=over</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=gray_building (gray colored building with a brick colored building in the right side)</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=absolute 180.0° / south</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1897__0&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 356.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;tree_ground&quot;,
+      &quot;description&quot;: &quot;ground with trees in it&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;gray_building&quot;,
+      &quot;description&quot;: &quot;gray colored building with a brick colored building in the right side&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 60.0,
+        &quot;clock&quot;: &quot;2:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;tree_ground&quot;,
+      &quot;relation&quot;: &quot;over&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;gray_building&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;description&quot;: &quot;south&quot;
+      }
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="1656__1 [ins] hi drone, head forward towards your 10 o&#x27;clock direction. after passing a group of trees, and then a small group of houses, you will continue onward and the destination is just past the next group of trees and is a small red house surrounded by a river behind it. [que] i see many red houses. can i see the destination? where should i go now?. [ins] turn one&#x27;o clock direction go forward  the red house next to river is your destination. [que] i see some red buildings next to the rivier. is the destination in my view? how does the destination look like? which direction should i go?. [ins] no, your destination is not in your view. it looks like very similar to the buildings next to the river, nevertheless in order to reach it you should turn to your left and move forward until you see a big rectangular building. [que] i see some long brown building. i cannot follow the instruction any more. please further explain it. . [ins] hi drone, you may use clock position, please go towards 5 o&#x27;clock direction. after passing trees and white hut house, you will see the destination. the destination is a brown building on the corner near the boat with blue grey color. group of trees small group of houses next group of trees small red house surrounded by a river behind it big rectangular building / long brown building white hut house boat with blue grey color brown building on the corner near the boat move pass reach turn" data-repaired="false" data-types="MOVE PASS REACH TURN">
+  <summary>
+    <span class="route-number">19</span>
+    <strong>1656__1</strong>
+    <span>7 turns</span><span>8 entities</span><span>14 events</span>
+    <span>start heading=262.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Hi drone, head forward towards your 10 o&#x27;clock direction. After passing a group of trees, and then a small group of houses, you will continue onward and the destination is just past the next group of trees and is a small red house surrounded by a river behind it.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see many red houses. Can I see the destination? Where should I go now?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>turn one&#x27;o clock direction go forward  the red house next to river is your destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I see some red buildings next to the rivier. Is the destination in my view? How does the destination look like? Which direction should I go?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>No, your destination is not in your view. It looks like very similar to the buildings next to the river, nevertheless in order to reach it you should turn to your left and move forward until you see a big rectangular building.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T6</span><p>I see some long brown building. I cannot follow the instruction any more. Please further explain it. .</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T7</span><p>Hi drone, you may use clock position, Please go towards 5 o&#x27;clock direction. After passing trees and white hut house, you will see the destination. The destination is a brown building on the corner near the boat with blue grey color.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>trees_1</code><span class='kind'>LANDMARK</span></div><p>group of trees</p></li><li><div><code>houses_1</code><span class='kind'>REGION</span></div><p>small group of houses</p></li><li><div><code>trees_2</code><span class='kind'>LANDMARK</span></div><p>next group of trees</p></li><li><div><code>red_house_river</code><span class='kind'>LANDMARK</span></div><p>small red house surrounded by a river behind it</p></li><li><div><code>rectangular_building</code><span class='kind'>LANDMARK</span></div><p>big rectangular building / long brown building</p></li><li><div><code>white_hut</code><span class='kind'>LANDMARK</span></div><p>white hut house</p></li><li><div><code>boat</code><span class='kind'>LANDMARK</span></div><p>boat with blue grey color</p></li><li><div><code>goal_brown_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>brown building on the corner near the boat</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 300.0° / 10:00</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=trees_1 (group of trees) · relation=pass</p></li><li><span class='event-index'>e3</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=houses_1 (small group of houses) · relation=pass</p></li><li><span class='event-index'>e4</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=trees_2 (next group of trees) · relation=pass</p></li><li><span class='event-index'>e5</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=red_house_river (small red house surrounded by a river behind it) · relation=just past the next group of trees</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 30.0° / 1:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e8</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 270.0° / left</p></li><li><span class='event-index'>e9</span><span class='event-type'>MOVE</span><span class='event-turn'>T5</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e10</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=rectangular_building (big rectangular building / long brown building) · relation=see</p></li><li><span class='event-index'>e11</span><span class='event-type'>TURN</span><span class='event-turn'>T7</span><p>direction=relative 150.0° / 5:00</p></li><li><span class='event-index'>e12</span><span class='event-type'>PASS</span><span class='event-turn'>T7</span><p>entity=trees_2 (next group of trees) · relation=pass</p></li><li><span class='event-index'>e13</span><span class='event-type'>PASS</span><span class='event-turn'>T7</span><p>entity=white_hut (white hut house) · relation=pass</p></li><li><span class='event-index'>e14</span><span class='event-type'>REACH</span><span class='event-turn'>T7</span><p>entity=goal_brown_building (brown building on the corner near the boat) · relation=on the corner near the boat · spatial=near the boat with blue grey color</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;1656__1&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 262.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;trees_1&quot;,
+      &quot;description&quot;: &quot;group of trees&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;houses_1&quot;,
+      &quot;description&quot;: &quot;small group of houses&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;trees_2&quot;,
+      &quot;description&quot;: &quot;next group of trees&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;red_house_river&quot;,
+      &quot;description&quot;: &quot;small red house surrounded by a river behind it&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;rectangular_building&quot;,
+      &quot;description&quot;: &quot;big rectangular building / long brown building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;white_hut&quot;,
+      &quot;description&quot;: &quot;white hut house&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;boat&quot;,
+      &quot;description&quot;: &quot;boat with blue grey color&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_brown_building&quot;,
+      &quot;description&quot;: &quot;brown building on the corner near the boat&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 300.0,
+        &quot;clock&quot;: &quot;10:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;trees_1&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;houses_1&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;trees_2&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;red_house_river&quot;,
+      &quot;relation&quot;: &quot;just past the next group of trees&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 30.0,
+        &quot;clock&quot;: &quot;1:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;description&quot;: &quot;left&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e9&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e10&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;rectangular_building&quot;,
+      &quot;relation&quot;: &quot;see&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e11&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 150.0,
+        &quot;clock&quot;: &quot;5:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e12&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;trees_2&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e13&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;white_hut&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e14&quot;,
+      &quot;turn&quot;: 7,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_brown_building&quot;,
+      &quot;relation&quot;: &quot;on the corner near the boat&quot;,
+      &quot;spatial_constraints&quot;: [
+        &quot;near the boat with blue grey color&quot;
+      ]
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2072__3 [ins] please go to the northeast direction at 1 o&#x27;clock you will see a dirt track after crossing green fields you will see the destination. the destination is a white horizontal  building. [que] i cannot follow the instruction any more. please further explain it. [ins] head north from your current position and cross a green field and then cross a dirt road. green field crossed first dirt track/road white horizontal building pass reach turn" data-repaired="false" data-types="PASS REACH TURN">
+  <summary>
+    <span class="route-number">20</span>
+    <strong>2072__3</strong>
+    <span>3 turns</span><span>3 entities</span><span>8 events</span>
+    <span>start heading=324.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Please go to the northeast direction at 1 o&#x27;clock you will see a dirt track after crossing green fields you will see the destination. The destination is a white horizontal  building.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I cannot follow the instruction any more. Please further explain it.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Head north from your current position and cross a green field and then cross a dirt road.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>green_field_1</code><span class='kind'>REGION</span></div><p>green field crossed first</p></li><li><div><code>dirt_track</code><span class='kind'>CORRIDOR</span></div><p>dirt track/road</p></li><li><div><code>white_building</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>white horizontal building</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 30.0° / 1:00</p></li><li><span class='event-index'>e2</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=green_field_1 (green field crossed first) · relation=cross</p></li><li><span class='event-index'>e3</span><span class='event-type'>PASS</span><span class='event-turn'>T1</span><p>entity=dirt_track (dirt track/road) · relation=cross</p></li><li><span class='event-index'>e4</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=white_building (white horizontal building)</p></li><li><span class='event-index'>e5</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=absolute 0.0° / north</p></li><li><span class='event-index'>e6</span><span class='event-type'>PASS</span><span class='event-turn'>T3</span><p>entity=green_field_1 (green field crossed first) · relation=cross</p></li><li><span class='event-index'>e7</span><span class='event-type'>PASS</span><span class='event-turn'>T3</span><p>entity=dirt_track (dirt track/road) · relation=cross</p></li><li><span class='event-index'>e8</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=white_building (white horizontal building)</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2072__3&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 324.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;green_field_1&quot;,
+      &quot;description&quot;: &quot;green field crossed first&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;dirt_track&quot;,
+      &quot;description&quot;: &quot;dirt track/road&quot;,
+      &quot;kind&quot;: &quot;CORRIDOR&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;white_building&quot;,
+      &quot;description&quot;: &quot;white horizontal building&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 30.0,
+        &quot;clock&quot;: &quot;1:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;green_field_1&quot;,
+      &quot;relation&quot;: &quot;cross&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;dirt_track&quot;,
+      &quot;relation&quot;: &quot;cross&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;white_building&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 0.0,
+        &quot;description&quot;: &quot;north&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;green_field_1&quot;,
+      &quot;relation&quot;: &quot;cross&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;PASS&quot;,
+      &quot;entity&quot;: &quot;dirt_track&quot;,
+      &quot;relation&quot;: &quot;cross&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e8&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;white_building&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details></section>
+<footer>计划来源：out\preds_out_full_sample2_no_thinking\instruction_plans.jsonl · 原指令来源：datasets\sample2\test_unseen_full_data.json · format_version=2</footer></main><script>
+(() => {
+  const search = document.getElementById('plan-search');
+  const repair = document.getElementById('repair-filter');
+  const type = document.getElementById('type-filter');
+  const count = document.getElementById('visible-count');
+  const routes = [...document.querySelectorAll('.route')];
+  function apply() {
+    const query = search.value.trim().toLowerCase();
+    let visible = 0;
+    routes.forEach(route => {
+      const okQuery = !query || route.dataset.search.includes(query);
+      const okRepair = !repair.value || route.dataset.repaired === repair.value;
+      const okType = !type.value || route.dataset.types.split(' ').includes(type.value);
+      route.hidden = !(okQuery && okRepair && okType);
+      if (!route.hidden) visible += 1;
+    });
+    count.textContent = `显示 ${visible} / ${routes.length} 条轨迹`;
+  }
+  search.addEventListener('input', apply);
+  repair.addEventListener('change', apply);
+  type.addEventListener('change', apply);
+  document.getElementById('expand-visible').addEventListener('click', () => {
+    const shouldOpen = routes.some(route => !route.hidden && !route.open);
+    routes.forEach(route => { if (!route.hidden) route.open = shouldOpen; });
+  });
+  apply();
+})();
+</script></body></html>

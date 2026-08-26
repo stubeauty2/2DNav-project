@@ -1,9 +1,10 @@
-"""Execute flat InstructionPlans in legacy or same-heading-window mode.
+"""Execute a parsed InstructionPlan strictly one event at a time.
 
-Legacy mode preserves the one-SearchStep-per-INS behavior.  ``ins-window``
-mode keeps parsed event order, splits before a real direction change, reuses
-the multi-scale baseline search as an event evidence engine, and commits only
-the longest prefix accepted by window-level progress confirmation.
+TURN changes heading without translation. MOVE advances a short fixed distance.
+REACH and AVOID localize only their active visual target through the Qwen +
+SAM3 tool chain before applying the event-specific motion. Pass-style motion
+is represented by a REACH event whose relation describes how to traverse the
+target.
 """
 
 from __future__ import annotations
@@ -31,94 +32,44 @@ for import_path in (FILE_DIR, SCRIPT_DIR):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from instruction_schema import (
-    EventType,
-    FORMAT_VERSION,
-    InstructionEvent,
-    InstructionPlan,
-    STATE_EVENT_TYPES,
-    normalize_angle,
-)
-from ins_window_runtime import (
-    HEADING_CHANGE_TOLERANCE_DEG,
-    ConfirmationResult,
-    EventCheck,
-    EventEvidence,
-    ExecutionWindow,
-    INSSession,
-    TentativeTrace,
-    WindowProgressReport,
-    aggregate_confirmation,
-    apply_event_heading,
-    angular_distance,
-    build_ins_sessions,
-    event_context_text,
-    longest_contiguous_prefix,
-)
-from search_plan_adapter import (
-    HeadingState,
-    SearchStep,
-    project_instruction_plan,
-    resolve_step_heading,
-)
+from instruction_schema import EventType, FORMAT_VERSION, InstructionEvent, InstructionPlan
+from reach_contracts import TargetSelectionResult
 
 
-_EXTERNAL_BASELINE_SEARCH_PATH = (
-    WORKSPACE_ROOT / "PSC-AVDN-baseline" / "script" / "ANDH-Full"
-    / "Search_Confirmation.py"
-)
-_IN_TREE_BASELINE_SEARCH_PATH = (
-    WORKSPACE_ROOT / "PSC-AVDN" / "script" / "ANDH"
-    / "Search_Confirmation.py"
-)
-BASELINE_SEARCH_PATH = Path(os.getenv(
-    "PSC_SEARCH_BASELINE_PATH",
-    str(
-        _EXTERNAL_BASELINE_SEARCH_PATH
-        if _EXTERNAL_BASELINE_SEARCH_PATH.exists()
-        else _IN_TREE_BASELINE_SEARCH_PATH
-    ),
-))
+SEARCH_ENGINE_PATH = FILE_DIR / "search_engine.py"
 PLANS_PATH = Path(os.getenv(
     "INSTRUCTION_PLANS_PATH",
-    str(WORKSPACE_ROOT / "out" / "preds_out_full_sample2" / "instruction_plans.jsonl"),
+    str(WORKSPACE_ROOT / "out" / "preds_out_full_sample3_no_thinking" / "instruction_plans.jsonl"),
 ))
-ANNO_DIR = WORKSPACE_ROOT / "datasets" / "sample2"
-DATASET_DIR = WORKSPACE_ROOT / "datasets" / "sample2"
+ANNO_DIR = WORKSPACE_ROOT / "datasets" / "sample3"
+DATASET_DIR = WORKSPACE_ROOT / "datasets" / "sample3"
 SPLIT = "test_unseen_full"
 OUT_DIR = (
-    WORKSPACE_ROOT / "out" / "preds" / "andh_full_sample2" / "search_output_no_confirmation"
-)
-WINDOWED_OUT_DIR = (
-    WORKSPACE_ROOT / "out" / "preds" / "andh_full_sample2_windowed"
-    / "search_output"
+    WORKSPACE_ROOT / "out" / "preds" / "andh_full_sample3"
+    / "sequential_search_output"
 )
 
 QWEN_URL = os.getenv(
     "VISION_MODEL_URL",
     "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
 )
-QWEN_MODEL = os.getenv("VISION_MODEL_NAME", "qwen-vl-max")
+QWEN_MODEL = os.getenv("VISION_MODEL_NAME", "qwen3-vl-plus")
 QWEN_API_KEY = (
     os.getenv("QWEN_API_KEY")
     or os.getenv("API_KEY")
     or os.getenv("API_TOKEN")
     or ""
 )
-SEARCH_SCALE_FACTOR = float(os.getenv("ROUTE_SEARCH_SCALE", "5"))
-SEARCH_STEP_METERS = float(os.getenv("ROUTE_SEARCH_STEP_METERS", "120"))
-MAX_SEARCH_STEPS = int(os.getenv("ROUTE_MAX_SEARCH_STEPS", "3"))
 MOTION_ONLY_METERS = float(os.getenv("ROUTE_MOTION_ONLY_METERS", "60"))
-HEADING_TOLERANCE_DEG = float(os.getenv(
-    "ROUTE_HEADING_TOLERANCE_DEG",
-    str(HEADING_CHANGE_TOLERANCE_DEG),
-))
-MAX_WINDOW_RUNS = int(os.getenv("ROUTE_MAX_WINDOW_RUNS", "2"))
 EVENT_CLEARANCE_METERS = float(os.getenv("ROUTE_EVENT_CLEARANCE_METERS", "30"))
+GROUNDING_BACKEND = os.getenv("GROUNDING_BACKEND", "sam3")
+VISION_TOOL_URL = os.getenv("VISION_TOOL_URL", "http://127.0.0.1:8765")
+MAX_TOOL_CALLS = int(os.getenv("MAX_TOOL_CALLS", "4"))
+QWEN_API_TIMEOUT = float(os.getenv("QWEN_API_TIMEOUT", "600"))
 
 
 @dataclass
-class BaselineSearchResult:
+class VisualSearchResult:
     found: bool
     destination_position: Optional[List[float]]
     predicted_corners: List[np.ndarray]
@@ -132,21 +83,10 @@ class RouteViewHistory:
     corners: List[np.ndarray]
     patches: List[np.ndarray]
     view_ids: List[str]
-    previous_grid_5x5: Optional[List[List[str]]] = None
-    grid_heading_deg: Optional[float] = None
 
     @classmethod
     def empty(cls) -> "RouteViewHistory":
         return cls(corners=[], patches=[], view_ids=[])
-
-    def prepare_window(self, heading_deg: float) -> None:
-        if (
-            self.grid_heading_deg is not None
-            and angular_distance(self.grid_heading_deg, heading_deg)
-            > HEADING_TOLERANCE_DEG
-        ):
-            self.previous_grid_5x5 = None
-        self.grid_heading_deg = float(heading_deg)
 
 
 def _console(stage: str, message: str) -> None:
@@ -164,41 +104,16 @@ def _load_module(name: str, path: Path):
 
 
 @lru_cache(maxsize=1)
-def _load_baseline_engine():
-    """Load baseline lazily so adapter tests need neither OpenCV nor Torch."""
-    if not BASELINE_SEARCH_PATH.exists():
-        raise FileNotFoundError(
-            f"baseline Search_Confirmation is missing: {BASELINE_SEARCH_PATH}"
-        )
-    baseline_script = BASELINE_SEARCH_PATH.parents[1]
-    baseline_src = baseline_script / "src"
-    baseline_full = BASELINE_SEARCH_PATH.parent
-    for import_path in (baseline_full, baseline_script, baseline_src):
-        if str(import_path) not in sys.path:
-            sys.path.insert(0, str(import_path))
-
-    previous_env = sys.modules.get("env")
-    previous_util = sys.modules.get("util")
-    try:
-        baseline_env = _load_module("_psc_baseline_env", baseline_src / "env.py")
-        sys.modules["env"] = baseline_env
-        baseline_util = _load_module("_psc_baseline_util", baseline_script / "util.py")
-        sys.modules["util"] = baseline_util
-        return _load_module("_psc_baseline_search", BASELINE_SEARCH_PATH)
-    finally:
-        if previous_env is None:
-            sys.modules.pop("env", None)
-        else:
-            sys.modules["env"] = previous_env
-        if previous_util is None:
-            sys.modules.pop("util", None)
-        else:
-            sys.modules["util"] = previous_util
+def _load_search_engine():
+    """Load the ANDH-Full image renderer and visual search lazily."""
+    if not SEARCH_ENGINE_PATH.exists():
+        raise FileNotFoundError(f"ANDH-Full search engine is missing: {SEARCH_ENGINE_PATH}")
+    return _load_module("_psc_full_search_engine", SEARCH_ENGINE_PATH)
 
 
 def qwen_locate_bbox_in_view(*args, **kwargs):
-    """Public proxy to the baseline multi-scale grounding call."""
-    return _load_baseline_engine().qwen_locate_bbox_in_view(*args, **kwargs)
+    """Public proxy for the Qwen + SAM3 grounding call."""
+    return _load_search_engine().qwen_locate_bbox_in_view(*args, **kwargs)
 
 
 def _read_json_if_present(path: Path) -> Dict[str, Any]:
@@ -211,167 +126,104 @@ def _read_json_if_present(path: Path) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _materialize_context_artifacts(
-    runtime,
-    observation: Dict[str, Any],
-    log: Dict[str, Any],
-    *,
-    instr_id: str,
-    out_dir: Path,
-    heading_deg: float,
-    destination: Optional[Sequence[float]],
-) -> None:
-    """Save baseline context views that were model inputs but not persisted."""
-    renderer = getattr(runtime, "create_view_image", None)
-    corner_builder = getattr(runtime, "generate_view_corners_with_scale", None)
-    if not callable(renderer) or not callable(corner_builder):
-        return
-    attempts = log.get("steps") if isinstance(log.get("steps"), list) else []
-    for attempt in attempts:
-        if not isinstance(attempt, dict):
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _attach_view_paths(log: Dict[str, Any]) -> None:
+    """Keep existing multi-scale and SAM3 artifacts that are present on disk."""
+    for step in log.get("steps", []):
+        if not isinstance(step, dict):
             continue
-        try:
-            step_number = int(attempt.get("k", 0)) + 1
-            position = [float(value) for value in attempt.get("pos", [])[:2]]
-        except (TypeError, ValueError):
-            continue
-        if len(position) != 2:
-            continue
-        prefix = out_dir / f"{instr_id}_step{step_number:02d}"
         paths = {
-            "main": str(prefix.with_name(
-                f"{prefix.name}_search_view_h{heading_deg:.1f}.jpg"
-            )),
-            "narrow": str(prefix.with_name(f"{prefix.name}_context_narrow_s3.jpg")),
-            "wide": str(prefix.with_name(f"{prefix.name}_context_wide_s7.jpg")),
-            "minimap": str(prefix.with_name(f"{prefix.name}_minimap.jpg")),
-            "detection": str(prefix.with_name(f"{prefix.name}_det.jpg")),
-            "confirmation": str(prefix.with_name(f"{prefix.name}_dest_confirm_hr.jpg")),
-            "confirmation_detection": str(prefix.with_name(
-                f"{prefix.name}_dest_confirm_det.jpg"
-            )),
-            "zoom": str(prefix.with_name(f"{prefix.name}_dest_zoom_hr.jpg")),
-        }
-        for scale, key in ((3.0, "narrow"), (7.0, "wide")):
-            try:
-                corners = corner_builder(
-                    position,
-                    observation,
-                    scale_factor=scale,
-                    angle_deg=heading_deg,
-                )
-                renderer(corners, observation, save_path=paths[key], out_px=768)
-            except Exception:
-                paths[key] = ""
-        attempt["view_paths"] = {
-            key: value for key, value in paths.items()
+            str(key): str(value)
+            for key, value in (step.get("view_paths") or {}).items()
             if value and Path(value).exists()
         }
-
-    if destination is not None and attempts:
-        found_attempt = next(
-            (
-                item for item in attempts
-                if isinstance(item, dict) and isinstance(item.get("confirm"), dict)
-            ),
-            attempts[-1],
-        )
-        paths = found_attempt.setdefault("view_paths", {})
-        step_number = int(found_attempt.get("k", 0)) + 1
-        for scale, label in ((3.0, "confirmation_narrow"), (7.0, "confirmation_wide")):
-            path = out_dir / f"{instr_id}_step{step_number:02d}_{label}.jpg"
-            try:
-                corners = corner_builder(
-                    destination,
-                    observation,
-                    scale_factor=scale,
-                    angle_deg=heading_deg,
-                )
-                renderer(corners, observation, save_path=str(path), out_px=768)
-            except Exception:
-                continue
-            if path.exists():
-                paths[label] = str(path)
+        qwen = step.get("qwen")
+        if isinstance(qwen, dict):
+            for key, value in (qwen.get("view_paths") or {}).items():
+                if value and Path(value).exists():
+                    paths[f"qwen_{key}"] = str(value)
+            mask_path = qwen.get("mask_path")
+            if mask_path and Path(mask_path).exists():
+                paths["qwen_selected_mask"] = str(mask_path)
+        step["view_paths"] = paths
 
 
 def search_and_reach_destination(
     instr_id: str,
     observation: Dict[str, Any],
     destination_description: str,
-    via_description: str,
     start_position: Sequence[float],
     heading_deg: float,
-    scale_factor: float,
     out_dir: Path,
     *,
-    step_meters: float = SEARCH_STEP_METERS,
-    max_steps: int = MAX_SEARCH_STEPS,
     api_key: str = QWEN_API_KEY,
     url: str = QWEN_URL,
     model: str = QWEN_MODEL,
     engine=None,
-    history_corners: Optional[Sequence[np.ndarray]] = None,
-    history_patches: Optional[Sequence[np.ndarray]] = None,
-    previous_grid_5x5: Optional[Sequence[Sequence[str]]] = None,
+    history: Optional[RouteViewHistory] = None,
     event_context: str = "",
-    enable_confirmation: bool = True,
-) -> BaselineSearchResult:
-    """Call the baseline search unchanged and attach its structured JSON log."""
-    runtime = engine or _load_baseline_engine()
+    grounding_backend: str = GROUNDING_BACKEND,
+    vision_tool_url: str = VISION_TOOL_URL,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    qwen_api_timeout: float = QWEN_API_TIMEOUT,
+    entity_kind: str = "LANDMARK",
+    event_type: str = "",
+    relation: str = "",
+    side: str = "",
+    is_final_goal: bool = False,
+) -> VisualSearchResult:
+    """Run one visual search with isolated candidate-selection and waypoint contexts."""
+    runtime = engine or _load_search_engine()
+    history = history or RouteViewHistory.empty()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    search_kwargs = dict(
+    found, destination, corners, zoom_index = runtime.search_and_reach_destination(
         instr_id=instr_id,
         ob=observation,
         dest_desc=destination_description,
-        via_desc=via_description or None,
         start_pos_latlng=list(start_position),
         heading_deg=float(heading_deg),
-        scale_factor=float(scale_factor),
         out_dir=str(out_dir),
-        step_meters=float(step_meters),
-        max_steps=int(max_steps),
         api_key=api_key,
         url=url,
         model=model,
-        enable_confirmation=bool(enable_confirmation),
-    )
-    if (
-        history_corners
-        or history_patches
-        or previous_grid_5x5 is not None
-        or event_context
-    ):
-        search_kwargs.update({
-            "history_corners": list(history_corners or []),
-            "history_patches": list(history_patches or []),
-            "previous_grid_5x5": previous_grid_5x5,
-            "event_context": event_context or None,
-        })
-    found, destination, corners, zoom_index = (
-        runtime.search_and_reach_destination(**search_kwargs)
+        event_context=event_context or None,
+        grounding_backend=grounding_backend,
+        vision_tool_url=vision_tool_url,
+        max_tool_calls=int(max_tool_calls),
+        qwen_api_timeout=float(qwen_api_timeout),
+        entity_kind=entity_kind,
+        event_type=event_type,
+        relation=relation,
+        side=side,
+        is_final_goal=bool(is_final_goal),
     )
     log_path = out_dir / f"{instr_id}_search.json"
     search_log = _read_json_if_present(log_path)
-    _materialize_context_artifacts(
-        runtime,
-        observation,
-        search_log,
-        instr_id=instr_id,
-        out_dir=out_dir,
-        heading_deg=float(heading_deg),
-        destination=destination,
-    )
+    _attach_view_paths(search_log)
     if search_log:
         log_path.write_text(
             json.dumps(_jsonable(search_log), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    return BaselineSearchResult(
+    return VisualSearchResult(
         found=bool(found),
-        destination_position=(list(destination) if destination is not None else None),
+        destination_position=list(destination) if destination is not None else None,
         predicted_corners=[np.asarray(item, dtype=float) for item in (corners or [])],
-        zoom_index=(int(zoom_index) if zoom_index is not None else None),
+        zoom_index=int(zoom_index) if zoom_index is not None else None,
         search_log=search_log,
         search_log_path=str(log_path),
     )
@@ -382,134 +234,77 @@ def _corners_center(corners: Sequence[Sequence[float]]) -> List[float]:
 
 
 def _move_forward_geo(
-    position: Sequence[float],
-    heading_deg: float,
-    meters: float,
+    position: Sequence[float], heading_deg: float, meters: float
 ) -> List[float]:
-    lat, lng = float(position[0]), float(position[1])
-    heading = math.radians(float(heading_deg))
-    lat += math.cos(heading) * float(meters) / 111_320.0
-    longitude_scale = max(1e-9, 111_320.0 * math.cos(math.radians(lat)))
-    lng += math.sin(heading) * float(meters) / longitude_scale
-    return [lat, lng]
+    latitude, longitude = float(position[0]), float(position[1])
+    radians = math.radians(float(heading_deg))
+    north_m = float(meters) * math.cos(radians)
+    east_m = float(meters) * math.sin(radians)
+    return [
+        latitude + north_m / 111_320.0,
+        longitude + east_m / (111_320.0 * max(0.01, math.cos(math.radians(latitude)))),
+    ]
 
 
 def _translate_footprint(template: np.ndarray, center: Sequence[float]) -> np.ndarray:
+    template = np.asarray(template, dtype=float)
     return template + (np.asarray(center, dtype=float) - np.mean(template, axis=0))
 
 
 def _signed_area(points: Sequence[Sequence[float]]) -> float:
-    values = np.asarray(points, dtype=float)
-    if len(values) < 3:
-        return 0.0
-    return 0.5 * float(sum(
-        values[index, 0] * values[(index + 1) % len(values), 1]
-        - values[(index + 1) % len(values), 0] * values[index, 1]
-        for index in range(len(values))
+    array = np.asarray(points, dtype=float)
+    return 0.5 * float(np.sum(
+        array[:, 0] * np.roll(array[:, 1], -1)
+        - array[:, 1] * np.roll(array[:, 0], -1)
     ))
 
 
 def _line_intersection(start, end, clip_start, clip_end):
-    direction = end - start
-    clip_direction = clip_end - clip_start
-    denominator = direction[0] * clip_direction[1] - direction[1] * clip_direction[0]
-    if abs(denominator) < 1e-15:
+    segment = end - start
+    clip = clip_end - clip_start
+    denominator = segment[0] * clip[1] - segment[1] * clip[0]
+    if abs(denominator) < 1e-12:
         return end
     delta = clip_start - start
-    fraction = (delta[0] * clip_direction[1] - delta[1] * clip_direction[0]) / denominator
-    return start + fraction * direction
+    factor = (delta[0] * clip[1] - delta[1] * clip[0]) / denominator
+    return start + factor * segment
 
 
 def _convex_intersection(subject, clip):
-    output = [np.asarray(item, dtype=float) for item in subject]
-    clip_values = [np.asarray(item, dtype=float) for item in clip]
-    orientation = 1.0 if _signed_area(clip_values) >= 0.0 else -1.0
-    for index, clip_start in enumerate(clip_values):
-        clip_end = clip_values[(index + 1) % len(clip_values)]
-        input_values = output
+    output = [np.asarray(point, dtype=float) for point in subject]
+    clip_points = [np.asarray(point, dtype=float) for point in clip]
+    orientation = 1.0 if _signed_area(clip_points) >= 0 else -1.0
+    for index, clip_start in enumerate(clip_points):
+        clip_end = clip_points[(index + 1) % len(clip_points)]
+        input_points = output
         output = []
-        if not input_values:
+        if not input_points:
             break
 
         def inside(point):
-            cross = (
-                (clip_end[0] - clip_start[0]) * (point[1] - clip_start[1])
-                - (clip_end[1] - clip_start[1]) * (point[0] - clip_start[0])
-            )
-            return orientation * cross >= -1e-15
+            edge = clip_end - clip_start
+            relative = point - clip_start
+            return orientation * (edge[0] * relative[1] - edge[1] * relative[0]) >= -1e-12
 
-        previous = input_values[-1]
-        for current in input_values:
-            current_inside = inside(current)
-            previous_inside = inside(previous)
-            if current_inside:
-                if not previous_inside:
-                    output.append(
-                        _line_intersection(previous, current, clip_start, clip_end)
-                    )
+        previous = input_points[-1]
+        for current in input_points:
+            if inside(current):
+                if not inside(previous):
+                    output.append(_line_intersection(previous, current, clip_start, clip_end))
                 output.append(current)
-            elif previous_inside:
-                output.append(
-                    _line_intersection(previous, current, clip_start, clip_end)
-                )
+            elif inside(previous):
+                output.append(_line_intersection(previous, current, clip_start, clip_end))
             previous = current
     return output
 
 
-def polygon_iou(
-    left: Sequence[Sequence[float]],
-    right: Sequence[Sequence[float]],
-) -> float:
+def polygon_iou(left: Sequence[Sequence[float]], right: Sequence[Sequence[float]]) -> float:
+    intersection = _convex_intersection(left, right)
+    intersection_area = abs(_signed_area(intersection)) if len(intersection) >= 3 else 0.0
     left_area = abs(_signed_area(left))
     right_area = abs(_signed_area(right))
-    intersection_area = abs(_signed_area(_convex_intersection(left, right)))
     union = left_area + right_area - intersection_area
-    return intersection_area / union if union > 0.0 else 0.0
-
-
-def _jsonable(value: Any) -> Any:
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
-
-
-def _state_updates(plan: InstructionPlan) -> List[Dict[str, Any]]:
-    return [
-        {
-            "event_id": event.event_id,
-            "turn": event.turn,
-            "type": event.event_type.value,
-            "entity": event.entity_ref,
-            "description": event.description,
-            "ref": event.ref,
-            "completed": event.completed,
-        }
-        for event in plan.events
-        if event.event_type in STATE_EVENT_TYPES
-    ]
-
-
-def _via_text(step: SearchStep) -> str:
-    return "; ".join(item.phrase() for item in step.via)
-
-
-def _compact_attempt(attempt: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(attempt, dict):
-        return {}
-    return {
-        key: attempt.get(key)
-        for key in (
-            "k", "action", "pos", "w", "h", "qwen", "confirm", "error",
-            "view_paths",
-        )
-        if key in attempt
-    }
+    return intersection_area / union if union > 0 else 0.0
 
 
 def _haversine_m(left: Sequence[float], right: Sequence[float]) -> float:
@@ -526,115 +321,66 @@ def _haversine_m(left: Sequence[float], right: Sequence[float]) -> float:
     )
 
 
-def _bbox_values(value: Any) -> Optional[List[float]]:
-    if isinstance(value, str):
-        parts = re.findall(r"-?\d+(?:\.\d+)?", value)
-        values = [float(item) for item in parts[:4]]
-    elif isinstance(value, (list, tuple)):
-        try:
-            values = [float(item) for item in value[:4]]
-        except (TypeError, ValueError):
+def _compact_attempt(attempt: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(attempt, dict):
+        return {}
+    return {
+        key: attempt.get(key)
+        for key in (
+            "step", "action", "pos", "view_scales", "render_errors", "w", "h",
+            "geometry_context",
+            "qwen", "error", "view_paths"
+        )
+        if key in attempt
+    }
+
+
+def _final_grounding_from_search(
+    search_log: Dict[str, Any], event: InstructionEvent
+) -> Optional[Dict[str, Any]]:
+    for step in reversed(search_log.get("steps", [])):
+        qwen = step.get("qwen") if isinstance(step, dict) else None
+        if not isinstance(qwen, dict) or not qwen.get("dest_present"):
+            continue
+        final_bbox = qwen.get("final_bbox_2d")
+        if not isinstance(final_bbox, list) or len(final_bbox) != 4:
             return None
-    else:
-        return None
-    if len(values) != 4 or values[2] <= values[0] or values[3] <= values[1]:
-        return None
-    return values
-
-
-def _latest_grid(search_log: Dict[str, Any]) -> Optional[List[List[str]]]:
-    latest = None
-    for attempt in search_log.get("steps", []):
-        if not isinstance(attempt, dict):
-            continue
-        for key in ("qwen", "confirm"):
-            value = attempt.get(key)
-            grid = value.get("grid_5x5") if isinstance(value, dict) else None
-            if isinstance(grid, list) and len(grid) == 5:
-                latest = grid
-    return latest
-
-
-def _detection_and_confirmation(
-    search_log: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    detection: Dict[str, Any] = {}
-    confirmation: Dict[str, Any] = {}
-    detection_k: Optional[int] = None
-    for attempt in search_log.get("steps", []):
-        if not isinstance(attempt, dict):
-            continue
-        qwen = attempt.get("qwen")
-        if isinstance(qwen, dict) and qwen.get("dest_present"):
-            detection = qwen
-            detection_k = int(attempt.get("k") or 0)
-        confirm = attempt.get("confirm")
-        if (
-            isinstance(confirm, dict)
-            and detection_k is not None
-            and int(attempt.get("k") or 0) == detection_k
-        ):
-            confirmation = confirm
-    return detection, confirmation
-
-
-def _observation_view_records(
-    search_log: Dict[str, Any],
-    *,
-    window_id: str,
-    run_index: int,
-    event_id: str,
-    candidate_index: int,
-) -> List[Dict[str, Any]]:
-    records: List[Dict[str, Any]] = []
-    seen = set()
-    for attempt in search_log.get("steps", []):
-        if not isinstance(attempt, dict):
-            continue
-        k = int(attempt.get("k") or 0)
-        paths = attempt.get("view_paths")
-        if not isinstance(paths, dict):
-            continue
-        for label, path in paths.items():
-            if not path or str(path) in seen:
-                continue
-            seen.add(str(path))
-            records.append({
-                "view_id": str(path),
-                "window_id": window_id,
-                "run_index": run_index,
-                "event_id": event_id,
-                "candidate_index": candidate_index,
-                "search_index": k,
-                "view_type": str(label),
-                "path": str(path),
-                "position": attempt.get("pos"),
-            })
-    return records
+        return {
+            "event_id": event.event_id,
+            "candidate_id": qwen.get("selected_candidate_id"),
+            "bbox_2d": list(final_bbox),
+            "raw_bbox_2d": list(qwen.get("candidate_bbox_2d") or qwen.get("raw_bbox_2d") or []),
+            "candidate_bbox_2d": list(qwen.get("candidate_bbox_2d") or []),
+            "bbox_latlng": list(qwen.get("final_bbox_latlng") or []),
+            "target_point_2d": qwen.get("target_point_2d"),
+            "mask_path": qwen.get("mask_path") or "",
+            "bbox_grounding": qwen.get("bbox_grounding") or {},
+            "confidence": qwen.get("confidence"),
+            "reason": qwen.get("reason") or "",
+            "view_id": "main",
+            "source_scale": 5,
+        }
+    return None
 
 
 def _update_route_history(
     history: RouteViewHistory,
-    result: BaselineSearchResult,
+    result: VisualSearchResult,
     observation: Dict[str, Any],
     runtime,
     *,
     heading_deg: float,
-    scale_factor: float,
 ) -> None:
-    grid = _latest_grid(result.search_log)
-    if grid is not None:
-        history.previous_grid_5x5 = grid
     corner_builder = getattr(runtime, "generate_view_corners_with_scale", None)
     cv2_module = getattr(runtime, "cv2", None)
     if not callable(corner_builder) or cv2_module is None:
         return
-    for attempt in result.search_log.get("steps", []):
-        if not isinstance(attempt, dict) or not isinstance(attempt.get("qwen"), dict):
+    for step in result.search_log.get("steps", []):
+        if not isinstance(step, dict) or not isinstance(step.get("qwen"), dict):
             continue
-        paths = attempt.get("view_paths") or {}
+        paths = step.get("view_paths") or {}
         main_path = str(paths.get("main") or "")
-        position = attempt.get("pos") or []
+        position = step.get("pos") or []
         if not main_path or main_path in history.view_ids or len(position) < 2:
             continue
         patch = cv2_module.imread(main_path)
@@ -644,7 +390,7 @@ def _update_route_history(
             corners = corner_builder(
                 [float(position[0]), float(position[1])],
                 observation,
-                scale_factor=float(scale_factor),
+                scale_factor=float((step.get("view_scales") or {}).get("main", 5.0)),
                 angle_deg=float(heading_deg),
             )
         except Exception:
@@ -654,1108 +400,461 @@ def _update_route_history(
         history.view_ids.append(main_path)
 
 
-def _materialize_event_end_view(
-    history: RouteViewHistory,
-    runtime,
-    observation: Dict[str, Any],
-    *,
-    route_dir: Path,
-    window_id: str,
-    run_index: int,
-    event_id: str,
-    position: Sequence[float],
-    heading_deg: float,
-    scale_factor: float,
-) -> Optional[Dict[str, Any]]:
-    corner_builder = getattr(runtime, "generate_view_corners_with_scale", None)
-    renderer = getattr(runtime, "create_view_image", None)
-    if not callable(corner_builder) or not callable(renderer):
-        return None
-    path = route_dir / f"{window_id}_r{run_index}_{event_id}_event_end.jpg"
-    try:
-        corners = np.asarray(corner_builder(
-            list(position),
-            observation,
-            scale_factor=float(scale_factor),
-            angle_deg=float(heading_deg),
-        ), dtype=float)
-        patch = renderer(
-            corners,
-            observation,
-            save_path=str(path),
-            out_px=768,
-        )
-    except Exception:
-        return None
-    if patch is None:
-        return None
-    history.corners.append(corners)
-    history.patches.append(patch)
-    history.view_ids.append(str(path))
-    return {
-        "view_id": str(path),
-        "window_id": window_id,
-        "run_index": run_index,
-        "event_id": event_id,
-        "candidate_index": None,
-        "search_index": None,
-        "view_type": "event_end",
-        "path": str(path),
-        "position": list(position),
-    }
+def _read_selection_replay(path: Path) -> Tuple[TargetSelectionResult, Dict[str, Any]]:
+    """Read either selection.json or its richer selection_log.json sibling."""
+    path = Path(path)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict) and isinstance(raw.get("selection"), dict):
+        selection_raw = raw["selection"]
+        context = raw
+    else:
+        selection_raw = raw
+        sibling = path.with_name("selection_log.json")
+        context = json.loads(sibling.read_text(encoding="utf-8")) if sibling.exists() else {}
+    return TargetSelectionResult.from_dict(selection_raw), context
 
 
-def _event_description(
-    event: InstructionEvent,
-    window: ExecutionWindow,
-) -> str:
-    description = window.event_descriptions.get(event.event_id, "")
-    parts = [
-        f"Active event {event.event_id} is {event.event_type.value}.",
-        f"Localize only this event target: {description or event.entity_ref}.",
-    ]
+def _event_target_text(plan: InstructionPlan, event: InstructionEvent) -> str:
+    entity = plan.entities[event.entity_ref]
+    parts = [entity.description]
+    if event.relation:
+        parts.append(f"required relation: {event.relation}")
+    if event.spatial_constraints:
+        parts.append("spatial constraints: " + "; ".join(event.spatial_constraints))
     if event.side:
-        parts.append(f"Required relative side: {event.side}.")
+        parts.append(f"required side relative to travel direction: {event.side}")
     if event.count > 1:
-        parts.append(
-            f"This call is for one of {event.count} distinct ordered instances."
-        )
-    return " ".join(parts)
+        parts.append(f"ordered instance count: {event.count}")
+    return ". ".join(parts)
+
+
+def _event_context(
+    plan: InstructionPlan,
+    event: InstructionEvent,
+    completed_event_ids: Sequence[str],
+    candidate_index: int,
+    excluded_positions: Sequence[Sequence[float]],
+) -> str:
+    entity = plan.entities[event.entity_ref]
+    context = {
+        "active_event": {
+            "event_id": event.event_id,
+            "event_type": event.event_type.value,
+            "target": {
+                "description": entity.description,
+                "kind": entity.kind.value,
+                "goal": bool(entity.goal),
+            },
+            "relation": event.relation or None,
+            "spatial_constraints": list(event.spatial_constraints),
+            "side_relative_to_image_forward": event.side or None,
+            "instance_index": int(candidate_index),
+            "instance_count": int(event.count or 1),
+        },
+        "completed_event_ids": list(completed_event_ids),
+        "previous_distinct_instance_count": len(excluded_positions),
+        "instruction": (
+            "Only the active event may be localized. Historical headings, compass words, "
+            "clock directions, raw dialogue, and geographic coordinates are intentionally omitted."
+        ),
+    }
+    return json.dumps(context, ensure_ascii=False, separators=(",", ":"))
 
 
 def _event_motion_position(
     event: InstructionEvent,
-    candidate_position: Sequence[float],
+    target_position: Sequence[float],
     heading_deg: float,
 ) -> List[float]:
-    """Convert a localized object into the event's tentative end pose."""
-    if event.event_type == EventType.APPROACH:
+    relation = event.relation.strip().casefold()
+    pass_prefixes = (
+        "pass",
+        "fly over",
+        "flyover",
+        "cross",
+        "go through",
+        "travel along",
+    )
+    if event.event_type == EventType.REACH and relation.startswith(pass_prefixes):
+        return _move_forward_geo(target_position, heading_deg, EVENT_CLEARANCE_METERS)
+    if event.event_type == EventType.AVOID:
         return _move_forward_geo(
-            candidate_position,
-            normalize_angle(float(heading_deg) + 180.0),
+            target_position,
+            float(heading_deg) + 180.0,
             EVENT_CLEARANCE_METERS,
         )
-    if event.event_type in {
-        EventType.PASS,
-        EventType.CROSS,
-        EventType.GO_THROUGH,
-        EventType.ENTER,
-        EventType.EXIT,
-        EventType.FOLLOW,
-    }:
-        return _move_forward_geo(
-            candidate_position,
-            heading_deg,
-            EVENT_CLEARANCE_METERS,
-        )
-    return list(candidate_position)
+    return list(target_position)
 
 
-def _event_evidence(
+def _record_pose(
+    physical_boxes: List[np.ndarray],
+    physical_headings: List[float],
+    physical_trajectory: List[Dict[str, Any]],
+    template_footprint: np.ndarray,
+    *,
     event: InstructionEvent,
-    result: BaselineSearchResult,
-    *,
-    window_id: str,
-    candidate_index: int,
-) -> EventEvidence:
-    detection, confirmation = _detection_and_confirmation(result.search_log)
-    bbox = _bbox_values(detection.get("bbox_2d"))
-    confirm_present = bool(confirmation.get("dest_present"))
-    view_ids = [
-        str(path)
-        for attempt in result.search_log.get("steps", [])
-        if isinstance(attempt, dict)
-        for path in (attempt.get("view_paths") or {}).values()
-        if path
-    ]
-    found = bool(
-        result.found and result.destination_position is not None and bbox is not None
-    )
-    explanation_parts = [str(detection.get("reason") or "").strip()]
-    if confirmation:
-        explanation_parts.append(
-            "Confirmation: " + str(confirmation.get("reason") or "").strip()
-        )
-    return EventEvidence(
-        event_id=event.event_id,
-        event_type=event.event_type.value,
-        candidate_id=f"{window_id}_{event.event_id}_c{candidate_index}",
-        candidate_index=candidate_index,
-        found=found,
-        destination_position=(
-            list(result.destination_position)
-            if result.destination_position is not None else None
-        ),
-        bbox_2d=bbox,
-        confidence=float(detection.get("confidence") or 0.0),
-        confirmation_present=confirm_present,
-        confirmation_confidence=float(confirmation.get("confidence") or 0.0),
-        evidence_view_ids=list(dict.fromkeys(view_ids)),
-        search_log_path=result.search_log_path,
-        attempts=[
-            _compact_attempt(item)
-            for item in result.search_log.get("steps", [])
-        ],
-        progress_claim="COMPLETED" if found else "NOT_FOUND",
-        explanation=" ".join(item for item in explanation_parts if item),
-    )
+    event_index: int,
+    position: Sequence[float],
+    heading_deg: float,
+) -> None:
+    physical_boxes.append(_translate_footprint(template_footprint, position))
+    physical_headings.append(float(heading_deg))
+    physical_trajectory.append({
+        "event_index": event_index,
+        "event_id": event.event_id,
+        "event_type": event.event_type.value,
+        "position": list(position),
+        "heading_deg": float(heading_deg),
+    })
 
 
-def _side_matches(side: str, bbox: Optional[Sequence[float]]) -> bool:
-    side_text = str(side or "").strip().lower()
-    if not side_text or bbox is None:
-        return True
-    center_x = 0.5 * (float(bbox[0]) + float(bbox[2]))
-    if "left" in side_text:
-        return center_x < 384.0
-    if "right" in side_text:
-        return center_x > 384.0
-    return True
-
-
-def _run_window_search(
-    session: INSSession,
-    window: ExecutionWindow,
-    observation: Dict[str, Any],
-    *,
-    run_index: int,
-    start_position: Sequence[float],
-    confirmed_event_ids: Sequence[str],
-    correction: str,
-    rejected_candidates: Sequence[str],
-    route_dir: Path,
-    history: RouteViewHistory,
-    search_scale: float,
-    step_meters: float,
-    max_search_steps: int,
-    api_key: str,
-    url: str,
-    model: str,
-    enable_confirmation: bool,
-    runtime,
-) -> Tuple[WindowProgressReport, List[Dict[str, Any]]]:
-    ordered_ids = [event.event_id for event in window.events]
-    claimed = list(confirmed_event_ids)
-    confirmed_set = set(confirmed_event_ids)
-    tentative_position = list(start_position)
-    traces: List[TentativeTrace] = []
-    evidences: List[EventEvidence] = []
-    observation_views: List[Dict[str, Any]] = []
-    base_excluded = list(rejected_candidates)
-    stop_reason = "WINDOW_COMPLETE"
-    run_status = "COMPLETE"
-
-    history.prepare_window(window.travel_heading_deg)
-    for event in window.events:
-        if event.event_id in confirmed_set:
-            continue
-        trace_id = f"{window.window_id}_r{run_index}_a{len(traces) + 1}"
-        if event.event_type == EventType.TURN:
-            claimed.append(event.event_id)
-            traces.append(TentativeTrace(
-                trace_id=trace_id,
-                event_ids=[event.event_id],
-                position=list(tentative_position),
-                heading_deg=window.travel_heading_deg,
-            ))
-            continue
-        if event.event_type == EventType.MOVE and not event.requires_visual_search:
-            has_later_visual = any(
-                later.requires_visual_search
-                and later.event_id not in confirmed_set
-                for later in window.events[
-                    list(window.events).index(event) + 1:
-                ]
-            )
-            if not has_later_visual:
-                tentative_position = _move_forward_geo(
-                    tentative_position,
-                    window.travel_heading_deg,
-                    MOTION_ONLY_METERS,
-                )
-            claimed.append(event.event_id)
-            traces.append(TentativeTrace(
-                trace_id=trace_id,
-                event_ids=[event.event_id],
-                position=list(tentative_position),
-                heading_deg=window.travel_heading_deg,
-            ))
-            continue
-        if not event.requires_visual_search:
-            claimed.append(event.event_id)
-            traces.append(TentativeTrace(
-                trace_id=trace_id,
-                event_ids=[event.event_id],
-                position=list(tentative_position),
-                heading_deg=window.travel_heading_deg,
-            ))
-            continue
-
-        event_positions: List[List[float]] = []
-        # Exclusions are local to this event. Separate entity mentions may
-        # intentionally resolve to the same physical object; only count>1
-        # requires distinct candidates.
-        event_excluded = list(base_excluded)
-        required_count = max(1, int(event.count or 1))
-        event_complete = True
-        for candidate_index in range(1, required_count + 1):
-            context = event_context_text(
-                session,
-                window,
-                event,
-                confirmed_event_ids=claimed,
-                correction=correction,
-                excluded_candidates=event_excluded,
-            )
-            search_id = (
-                f"{window.window_id}_r{run_index}_{event.event_id}"
-                f"_c{candidate_index}"
-            )
-            result = search_and_reach_destination(
-                search_id,
-                observation,
-                _event_description(event, window),
-                context,
-                tentative_position,
-                window.travel_heading_deg,
-                search_scale,
-                route_dir,
-                step_meters=step_meters,
-                max_steps=max_search_steps,
-                api_key=api_key,
-                url=url,
-                model=model,
-                enable_confirmation=enable_confirmation,
-                engine=runtime,
-                history_corners=history.corners,
-                history_patches=history.patches,
-                previous_grid_5x5=history.previous_grid_5x5,
-                event_context=context,
-            )
-            evidence = _event_evidence(
-                event,
-                result,
-                window_id=window.window_id,
-                candidate_index=candidate_index,
-            )
-            evidences.append(evidence)
-            observation_views.extend(_observation_view_records(
-                result.search_log,
-                window_id=window.window_id,
-                run_index=run_index,
-                event_id=event.event_id,
-                candidate_index=candidate_index,
-            ))
-            _update_route_history(
-                history,
-                result,
-                observation,
-                runtime,
-                heading_deg=window.travel_heading_deg,
-                scale_factor=search_scale,
-            )
-            if not evidence.found or evidence.destination_position is None:
-                event_complete = False
-                break
-            if any(
-                _haversine_m(evidence.destination_position, previous) < 3.0
-                for previous in event_positions
-            ):
-                evidence.found = False
-                evidence.progress_claim = "NOT_FOUND"
-                evidence.explanation += " Candidate duplicates an earlier instance."
-                event_complete = False
-                break
-            event_positions.append(list(evidence.destination_position))
-            tentative_position = _event_motion_position(
-                event,
-                evidence.destination_position,
-                window.travel_heading_deg,
-            )
-            event_excluded.append(
-                f"{evidence.candidate_id} bbox={evidence.bbox_2d}"
-            )
-
-        if event.event_type == EventType.AVOID:
-            event_complete = False
-            stop_reason = "NEEDS_REPLAN"
-        if not event_complete:
-            run_status = "PARTIAL" if len(claimed) > len(confirmed_set) else "BLOCKED"
-            if stop_reason != "NEEDS_REPLAN":
-                stop_reason = "NOT_FOUND"
-            break
-        claimed.append(event.event_id)
-        end_view = _materialize_event_end_view(
-            history,
-            runtime,
-            observation,
-            route_dir=route_dir,
-            window_id=window.window_id,
-            run_index=run_index,
-            event_id=event.event_id,
-            position=tentative_position,
-            heading_deg=window.travel_heading_deg,
-            scale_factor=search_scale,
-        )
-        if end_view is not None:
-            observation_views.append(end_view)
-        traces.append(TentativeTrace(
-            trace_id=trace_id,
-            event_ids=[event.event_id],
-            position=list(tentative_position),
-            heading_deg=window.travel_heading_deg,
-            view_ids=[
-                view_id
-                for evidence in evidences if evidence.event_id == event.event_id
-                for view_id in evidence.evidence_view_ids
-            ] + ([end_view["view_id"]] if end_view is not None else []),
-        ))
-
-    active = next((event_id for event_id in ordered_ids if event_id not in claimed), None)
-    if active is not None and run_status == "COMPLETE":
-        run_status = "PARTIAL"
-        stop_reason = "SEARCH_BUDGET"
-    completed_now = len(claimed) - len(confirmed_event_ids)
-    evidence_summary = "; ".join(
-        (
-            f"{item.event_id}/c{item.candidate_index}:"
-            f"search={item.found},confirm={item.confirmation_present},"
-            f"confidence={item.confidence:.2f}"
-        )
-        for item in evidences
-    )
-    progress_summary = (
-        f"Window {window.window_id} run {run_index}: completed {completed_now} "
-        f"new events; next={active or 'none'}; stop={stop_reason}. "
-        f"Evidence: {evidence_summary or 'geometry-only window'}."
-    )
-    return WindowProgressReport(
-        window_id=window.window_id,
-        run_index=run_index,
-        run_status=run_status,
-        claimed_completed_event_ids=claimed,
-        active_event_id=active,
-        tentative_trace=traces,
-        event_evidence=evidences,
-        progress_summary=progress_summary,
-        stop_reason=stop_reason,
-        correction_applied=correction,
-    ), observation_views
-
-
-def _window_event_checks(
-    window: ExecutionWindow,
-    report: WindowProgressReport,
-    previously_confirmed: Sequence[str],
-    start_position: Sequence[float],
-) -> List[EventCheck]:
-    claimed = list(report.claimed_completed_event_ids)
-    ordered = [event.event_id for event in window.events]
-    evidence_by_event: Dict[str, List[EventEvidence]] = {}
-    for evidence in report.event_evidence:
-        evidence_by_event.setdefault(evidence.event_id, []).append(evidence)
-    checks: List[EventCheck] = []
-    previous_set = set(previously_confirmed)
-    for index, event in enumerate(window.events):
-        prefix_claimed = claimed[:index + 1] == ordered[:index + 1]
-        if event.event_id in previous_set:
-            checks.append(EventCheck(
-                event_id=event.event_id,
-                same_candidate=True,
-                order_valid=True,
-                motion_valid=True,
-                visual_valid=True,
-                result="PASS",
-                explanation="Accepted by an earlier run of the same window.",
-            ))
-            continue
-        if not event.requires_visual_search:
-            valid = event.event_id in claimed and prefix_claimed
-            checks.append(EventCheck(
-                event_id=event.event_id,
-                same_candidate=True,
-                order_valid=prefix_claimed,
-                motion_valid=valid,
-                visual_valid=True,
-                result="PASS" if valid else "FAIL",
-                explanation=(
-                    "Controller trace matches the same-heading window."
-                    if valid else "The control event was not completed in order."
-                ),
-            ))
-            continue
-
-        evidences = evidence_by_event.get(event.event_id, [])
-        enough = len(evidences) >= max(1, int(event.count or 1))
-        found = enough and all(item.found for item in evidences)
-        confirmed = enough and all(item.confirmation_present for item in evidences)
-        side_valid = enough and all(
-            _side_matches(event.side, item.bbox_2d) for item in evidences
-        )
-        end_position = next(
-            (
-                trace.position for trace in reversed(report.tentative_trace)
-                if event.event_id in trace.event_ids
-            ),
-            None,
-        )
-        moved = bool(
-            end_position is not None
-            and _haversine_m(start_position, end_position) >= 1.0
-        )
-        relation_requires_motion = event.event_type in {
-            EventType.PASS,
-            EventType.CROSS,
-            EventType.GO_THROUGH,
-            EventType.ENTER,
-            EventType.EXIT,
-            EventType.FOLLOW,
-        }
-        motion_valid = found and (moved or not relation_requires_motion)
-        if event.event_type == EventType.AVOID:
-            motion_valid = False
-        valid = (
-            event.event_id in claimed
-            and prefix_claimed
-            and found
-            and confirmed
-            and side_valid
-            and motion_valid
-        )
-        explanation = (
-            f"candidates={len(evidences)}/{max(1, event.count)}, "
-            f"confirmed={confirmed}, side={side_valid}, motion={motion_valid}."
-        )
-        checks.append(EventCheck(
-            event_id=event.event_id,
-            same_candidate=confirmed,
-            order_valid=prefix_claimed,
-            motion_valid=motion_valid,
-            visual_valid=found and confirmed and side_valid,
-            result="PASS" if valid else "FAIL",
-            explanation=explanation,
-        ))
-    return checks
-
-
-def _trace_by_id(
-    report: WindowProgressReport,
-    trace_id: Optional[str],
-) -> Optional[TentativeTrace]:
-    return next(
-        (trace for trace in report.tentative_trace if trace.trace_id == trace_id),
-        None,
-    )
-
-
-def _search_only_commit_decision(
-    window: ExecutionWindow,
-    report: WindowProgressReport,
-    previously_accepted: Sequence[str],
-) -> ConfirmationResult:
-    """Commit Search's contiguous prefix when Confirmation is disabled.
-
-    ``ConfirmationResult`` is reused internally as the controller decision
-    envelope, but this path performs no confirmation checks or model calls.
-    """
-    ordered_ids = [event.event_id for event in window.events]
-    accepted = longest_contiguous_prefix(
-        ordered_ids,
-        report.claimed_completed_event_ids,
-    )
-    if list(report.claimed_completed_event_ids) != ordered_ids[:len(accepted)]:
-        accepted = list(previously_accepted)
-
-    if accepted == ordered_ids and report.run_status == "COMPLETE":
-        verdict = "PASS"
-    elif accepted:
-        verdict = "PARTIAL"
-    else:
-        verdict = "REJECT"
-
-    accepted_set = set(accepted)
-    commit_trace_id: Optional[str] = None
-    for trace in report.tentative_trace:
-        if trace.event_ids and set(trace.event_ids).issubset(accepted_set):
-            commit_trace_id = trace.trace_id
-
-    confirmed_cursor = window.start_event_index
-    if accepted:
-        index_by_id = {
-            event.event_id: event_index
-            for event, event_index in zip(window.events, window.event_indices)
-        }
-        confirmed_cursor = index_by_id[accepted[-1]] + 1
-
-    if verdict == "PASS":
-        correction = ""
-        summary = (
-            f"Confirmation disabled: committed all {len(accepted)} events "
-            f"reported complete by Search in {window.window_id}."
-        )
-    else:
-        next_event = next(
-            (event_id for event_id in ordered_ids if event_id not in accepted_set),
-            report.active_event_id,
-        )
-        correction = (
-            f"Confirmation disabled; retry Search from {next_event or 'window end'} "
-            f"after stop={report.stop_reason}."
-        )
-        summary = (
-            f"Confirmation disabled: committed {len(accepted)} leading events "
-            f"reported complete by Search; stop={report.stop_reason}."
-        )
-
-    return ConfirmationResult(
-        window_id=window.window_id,
-        run_index=report.run_index,
-        verdict=verdict,
-        accepted_event_ids=tuple(accepted),
-        confirmed_event_cursor=confirmed_cursor,
-        commit_trace_id=commit_trace_id,
-        event_checks=tuple(),
-        correction=correction,
-        progress_summary=summary,
-    )
-
-
-class INSWindowScheduler:
-    """Compile parsed INS turns into fixed-travel-heading execution windows."""
-
-    def __init__(self, heading_tolerance_deg: float = HEADING_TOLERANCE_DEG):
-        self.heading_tolerance_deg = float(heading_tolerance_deg)
-
-    def build(
-        self,
-        plan: InstructionPlan,
-        heading: HeadingState,
-    ) -> List[INSSession]:
-        sessions, _ = build_ins_sessions(
-            plan,
-            heading,
-            heading_tolerance_deg=self.heading_tolerance_deg,
-        )
-        return sessions
-
-
-class EventSearchAdapter:
-    """Run the existing multi-scale search as an event-evidence engine."""
-
-    def __init__(
-        self,
-        observation: Dict[str, Any],
-        route_dir: Path,
-        runtime,
-        *,
-        search_scale: float,
-        step_meters: float,
-        max_search_steps: int,
-        api_key: str,
-        url: str,
-        model: str,
-        enable_confirmation: bool,
-    ):
-        self.observation = observation
-        self.route_dir = route_dir
-        self.runtime = runtime
-        self.search_scale = search_scale
-        self.step_meters = step_meters
-        self.max_search_steps = max_search_steps
-        self.api_key = api_key
-        self.url = url
-        self.model = model
-        self.enable_confirmation = bool(enable_confirmation)
-        self.history = RouteViewHistory.empty()
-
-    def run(
-        self,
-        session: INSSession,
-        window: ExecutionWindow,
-        *,
-        run_index: int,
-        start_position: Sequence[float],
-        confirmed_event_ids: Sequence[str],
-        correction: str,
-        rejected_candidates: Sequence[str],
-    ) -> Tuple[WindowProgressReport, List[Dict[str, Any]]]:
-        return _run_window_search(
-            session,
-            window,
-            self.observation,
-            run_index=run_index,
-            start_position=start_position,
-            confirmed_event_ids=confirmed_event_ids,
-            correction=correction,
-            rejected_candidates=rejected_candidates,
-            route_dir=self.route_dir,
-            history=self.history,
-            search_scale=self.search_scale,
-            step_meters=self.step_meters,
-            max_search_steps=self.max_search_steps,
-            api_key=self.api_key,
-            url=self.url,
-            model=self.model,
-            enable_confirmation=self.enable_confirmation,
-            runtime=self.runtime,
-        )
-
-
-class ProgressConfirmationAdapter:
-    """Validate per-event evidence and accept only a contiguous event prefix."""
-
-    def confirm(
-        self,
-        window: ExecutionWindow,
-        report: WindowProgressReport,
-        *,
-        previously_confirmed: Sequence[str],
-        start_position: Sequence[float],
-    ) -> ConfirmationResult:
-        checks = _window_event_checks(
-            window,
-            report,
-            previously_confirmed,
-            start_position,
-        )
-        return aggregate_confirmation(window, report, checks)
-
-
-def execute_instruction_plan_legacy(
+def execute_instruction_plan(
     plan: InstructionPlan,
     observation: Dict[str, Any],
     *,
     out_dir: Optional[Path] = None,
-    search_scale: float = SEARCH_SCALE_FACTOR,
-    step_meters: float = SEARCH_STEP_METERS,
-    max_search_steps: int = MAX_SEARCH_STEPS,
+    motion_only_meters: float = MOTION_ONLY_METERS,
     api_key: str = QWEN_API_KEY,
     url: str = QWEN_URL,
     model: str = QWEN_MODEL,
-    enable_confirmation: bool = True,
+    grounding_backend: str = GROUNDING_BACKEND,
+    vision_tool_url: str = VISION_TOOL_URL,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    qwen_api_timeout: float = QWEN_API_TIMEOUT,
+    reach_phase: str = "all",
+    event_id: Optional[str] = None,
+    selection_replay: Optional[Path] = None,
     engine=None,
 ) -> Dict[str, Any]:
-    """Execute projected INS steps with the unchanged legacy behavior."""
-    validation_errors = plan.validate()
-    if validation_errors:
-        raise ValueError("invalid InstructionPlan: " + "; ".join(validation_errors))
-    gt_corners = observation.get("gt_path_corners") or []
-    if not gt_corners:
-        raise ValueError("observation has no gt_path_corners start pose")
-    runtime = engine or _load_baseline_engine()
+    """Run parsed events in list order and stop at the first failed target."""
+    if reach_phase not in {"all", "selection", "motion"}:
+        raise ValueError("reach_phase must be one of all, selection, motion")
+    if reach_phase != "all" and not event_id:
+        raise ValueError("selection and motion phases require --event-id")
+    runtime = engine or _load_search_engine()
     route_dir = Path(out_dir or OUT_DIR / plan.plan_id)
     route_dir.mkdir(parents=True, exist_ok=True)
-    template_footprint = np.asarray(gt_corners[0], dtype=float)
-    position = _corners_center(template_footprint)
-    starting_heading = float(observation.get("starting_angle") or 0.0)
-    heading = HeadingState(starting_heading, starting_heading).normalized()
-    steps = project_instruction_plan(plan)
-    predicted_boxes: List[np.ndarray] = []
-    predicted_headings: List[float] = []
-    step_records: List[Dict[str, Any]] = []
-    state_updates = _state_updates(plan)
-    state_update_by_id = {
-        item["event_id"]: item for item in state_updates
-    }
-    terminated = False
-    termination_reason = "completed_all_steps"
-
-    for step in steps:
-        heading_before = heading
-        heading = resolve_step_heading(step, heading)
-        current_view = np.asarray(runtime.generate_view_corners_with_scale(
-            position,
-            observation,
-            scale_factor=search_scale,
-            angle_deg=heading_before.body_heading_deg,
-        ), dtype=float)
-        turned_view = np.asarray(runtime.generate_view_corners_with_scale(
-            position,
-            observation,
-            scale_factor=search_scale,
-            angle_deg=heading.travel_heading_deg,
-        ), dtype=float)
-        predicted_boxes.extend([current_view, turned_view])
-        predicted_headings.extend([
-            heading_before.body_heading_deg,
-            heading.travel_heading_deg,
-        ])
-        record = step.to_dict()
-        record.update({
-            "body_heading_before_deg": heading_before.body_heading_deg,
-            "body_heading_after_deg": heading.body_heading_deg,
-            "resolved_heading_deg": heading.travel_heading_deg,
-            "position_before": list(position),
-            "state_events": [
-                state_update_by_id[event_id]
-                for event_id in step.source_event_ids
-                if event_id in state_update_by_id
-            ],
-        })
-
-        if step.motion_only:
-            if step.forward:
-                position = _move_forward_geo(
-                    position,
-                    heading.travel_heading_deg,
-                    MOTION_ONLY_METERS,
-                )
-                predicted_boxes.append(
-                    _translate_footprint(template_footprint, position)
-                )
-                predicted_headings.append(heading.travel_heading_deg)
-                record["status"] = "motion_only_moved"
-            else:
-                record["status"] = "turn_only"
-            record["position_after"] = list(position)
-            step_records.append(record)
-            continue
-
-        search_id = f"{plan.plan_id}_step{step.step_index:02d}"
-        result = search_and_reach_destination(
-            search_id,
-            observation,
-            step.grounding_query or step.destination_description,
-            _via_text(step),
-            position,
-            heading.travel_heading_deg,
-            search_scale,
-            route_dir,
-            step_meters=step_meters,
-            max_steps=max_search_steps,
-            api_key=api_key,
-            url=url,
-            model=model,
-            enable_confirmation=enable_confirmation,
-            engine=runtime,
-        )
-        predicted_boxes.extend(result.predicted_corners)
-        predicted_headings.extend(
-            [heading.travel_heading_deg] * len(result.predicted_corners)
-        )
-        record.update({
-            "status": "found" if result.found else "not_found",
-            "position_after": (
-                list(result.destination_position)
-                if result.destination_position is not None
-                else list(position)
-            ),
-            "search_log_path": result.search_log_path,
-            "zoom_index": result.zoom_index,
-            "search_attempts": [
-                _compact_attempt(item)
-                for item in result.search_log.get("steps", [])
-            ],
-        })
-        step_records.append(record)
-        if result.found and result.destination_position is not None:
-            position = list(result.destination_position)
-        else:
-            terminated = True
-            termination_reason = f"step_{step.step_index}_target_not_found"
-            break
-
-    goal = np.asarray(gt_corners[-1], dtype=float)
-    progress = [polygon_iou(item, goal) for item in predicted_boxes]
-    trajectory = [_corners_center(item) for item in predicted_boxes]
-    final_iou = float(progress[-1]) if progress else 0.0
-    reasoning = [
-        {
-            "step_index": item["step_index"],
-            "turn": item["turn"],
-            "status": item["status"],
-            "destination": item.get("destination_description", ""),
-            "resolved_heading_deg": item["resolved_heading_deg"],
-        }
-        for item in step_records
-    ]
-    return {
-        "instr_id": plan.plan_id,
-        "trajectory": trajectory,
-        "path_corners": [
-            (box.tolist(), float(resolved_heading))
-            for box, resolved_heading in zip(predicted_boxes, predicted_headings)
-        ],
-        "progress": progress,
-        "gt_progress": progress[:],
-        "gt_path_corners": [
-            np.asarray(item, dtype=float).tolist() for item in gt_corners
-        ],
-        "reasoning": reasoning,
-        "final_iou": final_iou,
-        "path_length": len(predicted_boxes),
-        "success": bool(final_iou > 0.3),
-        "search_steps": step_records,
-        "state_updates": state_updates,
-        "terminated": terminated,
-        "termination_reason": termination_reason,
-    }
-
-
-def execute_instruction_plan_windowed(
-    plan: InstructionPlan,
-    observation: Dict[str, Any],
-    *,
-    out_dir: Optional[Path] = None,
-    search_scale: float = SEARCH_SCALE_FACTOR,
-    step_meters: float = SEARCH_STEP_METERS,
-    max_search_steps: int = MAX_SEARCH_STEPS,
-    max_window_runs: int = MAX_WINDOW_RUNS,
-    heading_tolerance_deg: float = HEADING_TOLERANCE_DEG,
-    api_key: str = QWEN_API_KEY,
-    url: str = QWEN_URL,
-    model: str = QWEN_MODEL,
-    enable_confirmation: bool = True,
-    engine=None,
-) -> Dict[str, Any]:
-    """Execute one INS at a time through same-heading search windows."""
-    validation_errors = plan.validate()
-    if validation_errors:
-        raise ValueError("invalid InstructionPlan: " + "; ".join(validation_errors))
     gt_corners = observation.get("gt_path_corners") or []
     if not gt_corners:
-        raise ValueError("observation has no gt_path_corners start pose")
-    if max_window_runs <= 0:
-        raise ValueError("max_window_runs must be positive")
+        raise ValueError("observation has no gt_path_corners")
 
-    runtime = engine or _load_baseline_engine()
-    route_dir = Path(out_dir or WINDOWED_OUT_DIR / plan.plan_id)
-    route_dir.mkdir(parents=True, exist_ok=True)
     template_footprint = np.asarray(gt_corners[0], dtype=float)
     position = _corners_center(template_footprint)
-    starting_heading = float(observation.get("starting_angle") or 0.0)
-    heading = HeadingState(starting_heading, starting_heading).normalized()
-    scheduler = INSWindowScheduler(heading_tolerance_deg)
-    sessions = scheduler.build(plan, heading)
-    search_adapter = EventSearchAdapter(
-        observation,
-        route_dir,
-        runtime,
-        search_scale=search_scale,
-        step_meters=step_meters,
-        max_search_steps=max_search_steps,
-        api_key=api_key,
-        url=url,
-        model=model,
-        enable_confirmation=enable_confirmation,
-    )
-    confirmation_adapter = ProgressConfirmationAdapter()
-    execution_windows = [
-        window for session in sessions for window in session.windows
-    ]
-    physical_boxes: List[np.ndarray] = [template_footprint.copy()]
-    physical_headings: List[float] = [heading.travel_heading_deg]
+    starting_heading = float(
+        plan.starting_heading_deg
+        if plan.starting_heading_deg is not None
+        else observation.get("starting_angle") or 0.0
+    ) % 360.0
+    body_heading = starting_heading
+    travel_heading = starting_heading
+    history = RouteViewHistory.empty()
+
+    physical_boxes = [template_footprint.copy()]
+    physical_headings = [travel_heading]
     physical_trajectory: List[Dict[str, Any]] = [{
-        "trace_id": "start",
-        "window_id": None,
-        "event_ids": [],
+        "event_index": 0,
+        "event_id": None,
+        "event_type": "START",
         "position": list(position),
-        "heading_deg": heading.travel_heading_deg,
+        "heading_deg": travel_heading,
     }]
-    search_runs: List[Dict[str, Any]] = []
-    confirmation_runs: List[Dict[str, Any]] = []
     event_progress: List[Dict[str, Any]] = []
-    observation_views: List[Dict[str, Any]] = []
     search_steps: List[Dict[str, Any]] = []
     reasoning: List[Dict[str, Any]] = []
+    completed_event_ids: List[str] = []
     terminated = False
-    termination_reason = "completed_all_ins_sessions"
+    termination_reason = "completed_all_events"
+    final_target_grounding: Optional[Dict[str, Any]] = None
+    motion_replay: Optional[Tuple[TargetSelectionResult, Dict[str, Any]]] = None
+    if reach_phase == "motion":
+        replay_path = Path(selection_replay) if selection_replay else (
+            route_dir / str(event_id) / "selection.json"
+        )
+        motion_replay = _read_selection_replay(replay_path)
+        replay_context = motion_replay[1]
+        replay_position = replay_context.get("current_position")
+        replay_heading = replay_context.get("heading_deg")
+        if isinstance(replay_position, list) and len(replay_position) >= 2:
+            position = [float(replay_position[0]), float(replay_position[1])]
+        if replay_heading is not None:
+            travel_heading = float(replay_heading)
+            body_heading = travel_heading
+        physical_boxes[0] = _translate_footprint(template_footprint, position)
+        physical_headings[0] = travel_heading
+        physical_trajectory[0].update({
+            "position": list(position),
+            "heading_deg": travel_heading,
+        })
 
-    for session in sessions:
-        if not session.windows:
-            reasoning.append({
-                "session_id": session.session_id,
-                "turn": session.turn,
-                "status": "state_only",
-                "summary": "Applied state events without visual search.",
-            })
+    for event_index, event in enumerate(plan.events, start=1):
+        if reach_phase == "motion" and event.event_id != event_id:
             continue
-        for window in session.windows:
-            window_start_position = list(position)
-            accepted_prefix: List[str] = []
-            correction = ""
-            rejected_candidates: List[str] = []
-            window_complete = False
-            last_confirmation: Optional[ConfirmationResult] = None
-            last_commit_decision: Optional[ConfirmationResult] = None
-            window_run_indices: List[int] = []
+        event_record: Dict[str, Any] = {
+            "event_index": event_index,
+            "event_id": event.event_id,
+            "turn": event.turn,
+            "type": event.event_type.value,
+            "source_text": plan.source_for_turn(event.turn),
+            "target_description": (
+                _event_target_text(plan, event) if event.entity_ref else None
+            ),
+            "position_before": list(position),
+            "heading_before_deg": travel_heading,
+            "visual_searches": [],
+        }
+        _console(
+            "EVENT/START",
+            f"route={plan.plan_id} index={event_index}/{len(plan.events)} "
+            f"event={event.event_id}:{event.event_type.value}",
+        )
 
-            for run_index in range(1, max_window_runs + 1):
-                report, views = search_adapter.run(
-                    session,
-                    window,
-                    run_index=run_index,
-                    start_position=position,
-                    confirmed_event_ids=accepted_prefix,
-                    correction=correction,
-                    rejected_candidates=rejected_candidates,
-                )
-                window_run_indices.append(len(search_runs))
-                search_runs.append(report.to_dict())
-                observation_views.extend(views)
-                if enable_confirmation:
-                    commit_decision = confirmation_adapter.confirm(
-                        window,
-                        report,
-                        previously_confirmed=accepted_prefix,
-                        start_position=position,
-                    )
-                    confirmation_runs.append(commit_decision.to_dict())
-                    last_confirmation = commit_decision
-                else:
-                    commit_decision = _search_only_commit_decision(
-                        window,
-                        report,
-                        accepted_prefix,
-                    )
-                last_commit_decision = commit_decision
-
-                previous_accepted = set(accepted_prefix)
-                accepted_prefix = list(commit_decision.accepted_event_ids)
-                new_accepted = [
-                    event_id for event_id in accepted_prefix
-                    if event_id not in previous_accepted
-                ]
-                commit_trace = _trace_by_id(
-                    report,
-                    commit_decision.commit_trace_id,
-                )
-                if commit_decision.verdict in {"PASS", "PARTIAL"}:
-                    if commit_trace is not None:
-                        position = list(commit_trace.position)
-                    event_by_id = {
-                        event.event_id: event for event in window.events
+        if event.event_type == EventType.TURN:
+            if event.direction is None:
+                raise ValueError(f"TURN event {event.event_id} has no direction")
+            travel_heading = event.direction.resolve(body_heading)
+            body_heading = travel_heading
+            status = "turned"
+        elif event.event_type == EventType.MOVE:
+            position = _move_forward_geo(position, travel_heading, motion_only_meters)
+            status = "moved"
+        else:
+            entity = plan.entities[event.entity_ref]
+            is_final_goal = bool(entity.goal)
+            event_record["is_final_goal"] = is_final_goal
+            event_positions: List[List[float]] = []
+            status = "located"
+            for candidate_index in range(1, max(1, int(event.count or 1)) + 1):
+                call_id = f"{plan.plan_id}_{event.event_id}_c{candidate_index}"
+                stage_dir = route_dir / str(event.event_id)
+                if int(event.count or 1) > 1:
+                    stage_dir = stage_dir / f"c{candidate_index}"
+                if reach_phase == "motion":
+                    selection_result, replay_context = motion_replay  # type: ignore[misc]
+                    replay_paths = {
+                        str(key): str(value)
+                        for key, value in (replay_context.get("view_paths") or {}).items()
+                        if value
                     }
-                    for event_id in new_accepted:
-                        heading = apply_event_heading(event_by_id[event_id], heading)
-                        event_trace = next(
-                            (
-                                trace for trace in report.tentative_trace
-                                if event_id in trace.event_ids
-                            ),
-                            commit_trace,
-                        )
-                        event_progress.append({
-                            "event_id": event_id,
-                            "window_id": window.window_id,
-                            "turn": window.turn,
-                            "status": (
-                                "CONFIRMED"
-                                if enable_confirmation else "SEARCH_ACCEPTED"
-                            ),
-                            "run_index": run_index,
-                            "position": list(
-                                event_trace.position
-                                if event_trace is not None else position
-                            ),
-                            "heading_deg": heading.travel_heading_deg,
-                        })
-                    accepted_set = set(accepted_prefix)
-                    for trace in report.tentative_trace:
-                        if (
-                            trace.event_ids
-                            and set(trace.event_ids).issubset(accepted_set)
-                            and any(item in new_accepted for item in trace.event_ids)
-                        ):
-                            if (
-                                _haversine_m(
-                                    physical_trajectory[-1]["position"],
-                                    trace.position,
-                                ) > 0.01
-                                or angular_distance(
-                                    physical_headings[-1], trace.heading_deg
-                                ) > 0.1
-                            ):
-                                physical_boxes.append(_translate_footprint(
-                                    template_footprint,
-                                    trace.position,
-                                ))
-                                physical_headings.append(trace.heading_deg)
-                                physical_trajectory.append({
-                                    "trace_id": trace.trace_id,
-                                    "window_id": window.window_id,
-                                    "event_ids": list(trace.event_ids),
-                                    "position": list(trace.position),
-                                    "heading_deg": trace.heading_deg,
-                                })
-                if commit_decision.verdict == "PASS":
-                    window_complete = True
-                    break
-                correction = commit_decision.correction
-                if enable_confirmation:
-                    rejected_candidates.extend(
-                        f"{item.candidate_id} bbox={item.bbox_2d}"
-                        for item in report.event_evidence
-                        if not item.confirmation_present
+                    if not replay_paths:
+                        replay_paths = {
+                            str(key): str(value)
+                            for key, value in (selection_result.artifacts or {}).items()
+                            if key in {"main", "narrow", "wide", "minimap"} and value
+                        }
+                    motion = runtime.plan_reach_motion(
+                        call_id,
+                        observation,
+                        entity.description,
+                        position,
+                        travel_heading,
+                        selection_result.to_dict(),
+                        replay_paths,
+                        replay_context.get("view_corners") or {},
+                        str(stage_dir),
+                        api_key=api_key, url=url, model=model,
+                        event_type=event.event_type.value,
+                        relation=event.relation, side=event.side,
+                        event_id=event.event_id,
+                        grounding_backend=grounding_backend,
+                        vision_tool_url=vision_tool_url,
+                        qwen_api_timeout=qwen_api_timeout,
+                        clearance_meters=EVENT_CLEARANCE_METERS,
                     )
-
-            status = (
-                "found" if window_complete
-                else "partial" if accepted_prefix
-                else "not_found"
-            )
-            search_steps.append({
-                **window.to_dict(),
-                "step_index": len(search_steps) + 1,
-                "source_text": session.instruction_text,
-                "source_event_ids": [event.event_id for event in window.events],
-                "source_event_types": [
-                    event.event_type.value for event in window.events
-                ],
-                "resolved_heading_deg": window.travel_heading_deg,
-                "position_before": window_start_position,
-                "position_after": list(position),
-                "status": status,
-                "run_indices": window_run_indices,
-                "confirmation_enabled": bool(enable_confirmation),
-                "confirmation": (
-                    last_confirmation.to_dict() if last_confirmation else None
-                ),
-                "commit_decision": (
-                    last_commit_decision.to_dict()
-                    if last_commit_decision else None
-                ),
-                "search_attempts": [
-                    attempt
-                    for run_index_value in window_run_indices
-                    for evidence in search_runs[run_index_value]["event_evidence"]
-                    for attempt in evidence["attempts"]
-                ],
-            })
-            reasoning.append({
-                "window_id": window.window_id,
-                "turn": window.turn,
-                "status": status,
-                "accepted_event_ids": list(accepted_prefix),
-                "resolved_heading_deg": window.travel_heading_deg,
-                "summary": (
-                    last_commit_decision.progress_summary
-                    if last_commit_decision else "No commit decision was produced."
-                ),
-            })
-            if not window_complete:
-                terminated = True
-                if enable_confirmation:
-                    termination_reason = (
-                        f"{window.window_id}_not_confirmed_after_"
-                        f"{max_window_runs}_runs"
+                    event_record["motion"] = motion
+                    target_position = motion.get("target_position_latlng")
+                    result = VisualSearchResult(
+                        found=motion.get("status") == "planned" and target_position is not None,
+                        destination_position=list(target_position) if target_position else None,
+                        predicted_corners=[], zoom_index=None,
+                        search_log={"stage": "motion", "motion": motion},
+                        search_log_path=str((stage_dir / "motion.json").resolve()),
+                    )
+                elif reach_phase == "selection":
+                    selection = runtime.search_target(
+                        call_id, observation, entity.description, position, travel_heading,
+                        str(stage_dir), api_key=api_key, url=url, model=model,
+                        event_context=_event_context(
+                            plan, event, completed_event_ids, candidate_index, event_positions,
+                        ), grounding_backend=grounding_backend,
+                        vision_tool_url=vision_tool_url, max_tool_calls=max_tool_calls,
+                        qwen_api_timeout=qwen_api_timeout, entity_kind=entity.kind.value,
+                        event_type=event.event_type.value, event_id=event.event_id,
+                    )
+                    result = VisualSearchResult(
+                        found=selection.get("found") is True,
+                        destination_position=None,
+                        predicted_corners=[np.asarray(item, dtype=float) for item in selection.get("predicted_corners") or []],
+                        zoom_index=None,
+                        search_log=selection.get("search_log") or {},
+                        search_log_path=str(selection.get("search_log_path") or ""),
+                    )
+                    event_record.setdefault("selection", selection.get("selection") or {})
+                elif not callable(getattr(runtime, "search_target", None)):
+                    # Compatibility for lightweight engines used by legacy tests.
+                    result = search_and_reach_destination(
+                        call_id, observation, entity.description, position, travel_heading,
+                        route_dir, api_key=api_key, url=url, model=model, engine=runtime,
+                        history=history,
+                        event_context=_event_context(
+                            plan, event, completed_event_ids, candidate_index, event_positions,
+                        ), grounding_backend=grounding_backend,
+                        vision_tool_url=vision_tool_url, max_tool_calls=max_tool_calls,
+                        qwen_api_timeout=qwen_api_timeout, entity_kind=entity.kind.value,
+                        event_type=event.event_type.value, relation=event.relation,
+                        side=event.side, is_final_goal=is_final_goal,
                     )
                 else:
-                    termination_reason = (
-                        f"{window.window_id}_not_completed_after_"
-                        f"{max_window_runs}_search_runs"
+                    selection = runtime.search_target(
+                        call_id, observation, entity.description, position, travel_heading,
+                        str(stage_dir), api_key=api_key, url=url, model=model,
+                        event_context=_event_context(
+                            plan, event, completed_event_ids, candidate_index, event_positions,
+                        ), grounding_backend=grounding_backend,
+                        vision_tool_url=vision_tool_url, max_tool_calls=max_tool_calls,
+                        qwen_api_timeout=qwen_api_timeout, entity_kind=entity.kind.value,
+                        event_type=event.event_type.value, event_id=event.event_id,
                     )
+                    event_record.setdefault("selection", selection.get("selection") or {})
+                    motion = runtime.plan_reach_motion(
+                        call_id, observation, entity.description, position, travel_heading,
+                        selection.get("selection") or {}, selection.get("view_paths") or {},
+                        selection.get("view_corners") or {}, str(stage_dir),
+                        api_key=api_key, url=url, model=model,
+                        event_type=event.event_type.value, relation=event.relation,
+                        side=event.side, event_id=event.event_id,
+                        grounding_backend=grounding_backend,
+                        vision_tool_url=vision_tool_url, qwen_api_timeout=qwen_api_timeout,
+                        clearance_meters=EVENT_CLEARANCE_METERS,
+                    )
+                    event_record["motion"] = motion
+                    target_position = motion.get("target_position_latlng")
+                    result = VisualSearchResult(
+                        found=motion.get("status") == "planned" and target_position is not None,
+                        destination_position=list(target_position) if target_position else None,
+                        predicted_corners=[np.asarray(item, dtype=float) for item in selection.get("predicted_corners") or []],
+                        zoom_index=None,
+                        search_log={
+                            "stage": "all",
+                            "selection": selection.get("search_log") or {},
+                            "motion": motion,
+                        },
+                        search_log_path=str((stage_dir / "motion.json").resolve()),
+                    )
+                event_record["visual_searches"].extend(
+                    _compact_attempt(item)
+                    for item in result.search_log.get("steps", [])
+                    if isinstance(item, dict)
+                )
+                event_record.setdefault("search_logs", []).append(result.search_log_path)
+                _update_route_history(
+                    history,
+                    result,
+                    observation,
+                    runtime,
+                    heading_deg=travel_heading,
+                )
+                if reach_phase == "selection":
+                    selection_status = str((event_record.get("selection") or {}).get("status") or "failed")
+                    status = "selection_" + selection_status
+                    event_record.update({
+                        "status": status,
+                        "position_after": list(position),
+                        "heading_after_deg": travel_heading,
+                        "selection_json": str(
+                            (stage_dir / "selection.json").resolve()
+                        ),
+                    })
+                    search_steps.append(event_record)
+                    reasoning.append({
+                        "event_id": event.event_id,
+                        "event_type": event.event_type.value,
+                        "status": status,
+                        "summary": "Selection stage completed without changing route position.",
+                    })
+                    terminated = True
+                    termination_reason = f"selection_phase_{event.event_id}_{selection_status}"
+                    break
+                candidate = result.destination_position
+                duplicate = bool(
+                    candidate is not None
+                    and any(_haversine_m(candidate, previous) < 1.0 for previous in event_positions)
+                )
+                if not result.found or candidate is None or duplicate:
+                    status = "target_not_found" if not duplicate else "duplicate_target"
+                    terminated = True
+                    termination_reason = f"event_{event.event_id}_{status}"
+                    break
+                event_positions.append(list(candidate))
+                if is_final_goal:
+                    final_target_grounding = _final_grounding_from_search(
+                        result.search_log, event
+                    )
+                if reach_phase in {"all", "motion"} and isinstance(event_record.get("motion"), dict):
+                    planned_position = event_record["motion"].get("event_position_latlng")
+                    position = list(planned_position) if planned_position else _event_motion_position(
+                        event, candidate, travel_heading
+                    )
+                else:
+                    position = _event_motion_position(event, candidate, travel_heading)
+            if terminated:
+                event_record.update({
+                    "status": status,
+                    "position_after": list(position),
+                    "heading_after_deg": travel_heading,
+                })
+                search_steps.append(event_record)
+                reasoning.append({
+                    "event_id": event.event_id,
+                    "event_type": event.event_type.value,
+                    "status": status,
+                    "summary": "Visual localization failed; later events were not executed.",
+                })
+                _console("EVENT/STOP", f"route={plan.plan_id} reason={termination_reason}")
                 break
-        if terminated:
-            break
+            event_record["localized_positions"] = event_positions
 
-    unique_views: List[Dict[str, Any]] = []
-    seen_view_ids = set()
-    for item in observation_views:
-        if item["view_id"] in seen_view_ids:
-            continue
-        seen_view_ids.add(item["view_id"])
-        unique_views.append(item)
+        completed_event_ids.append(event.event_id)
+        _record_pose(
+            physical_boxes,
+            physical_headings,
+            physical_trajectory,
+            template_footprint,
+            event=event,
+            event_index=event_index,
+            position=position,
+            heading_deg=travel_heading,
+        )
+        event_record.update({
+            "status": status,
+            "position_after": list(position),
+            "heading_after_deg": travel_heading,
+        })
+        search_steps.append(event_record)
+        event_progress.append({
+            "event_index": event_index,
+            "event_id": event.event_id,
+            "event_type": event.event_type.value,
+            "status": "COMPLETED",
+            "position": list(position),
+            "heading_deg": travel_heading,
+        })
+        reasoning.append({
+            "event_id": event.event_id,
+            "event_type": event.event_type.value,
+            "status": status,
+            "summary": (
+                "Heading changed without translation."
+                if event.event_type == EventType.TURN
+                else "Moved a short fixed distance without visual search."
+                if event.event_type == EventType.MOVE
+                else "Qwen selected the active target through SAM3 and the event pose was applied."
+            ),
+        })
+        _console(
+            "EVENT/DONE",
+            f"route={plan.plan_id} event={event.event_id} status={status} "
+            f"position={position} heading={travel_heading:.1f}",
+        )
 
     goal = np.asarray(gt_corners[-1], dtype=float)
     progress = [polygon_iou(item, goal) for item in physical_boxes]
@@ -1763,75 +862,30 @@ def execute_instruction_plan_windowed(
     final_iou = float(progress[-1]) if progress else 0.0
     return {
         "instr_id": plan.plan_id,
-        "execution_mode": "ins-window",
-        "confirmation_enabled": bool(enable_confirmation),
+        "execution_mode": "sequential-events",
+        "reach_phase": reach_phase,
+        "debug_event_id": event_id,
+        "selection_replay": str(selection_replay) if selection_replay else None,
         "trajectory": trajectory,
         "physical_trajectory": physical_trajectory,
         "path_corners": [
-            (box.tolist(), float(resolved_heading))
-            for box, resolved_heading in zip(physical_boxes, physical_headings)
+            (box.tolist(), float(heading))
+            for box, heading in zip(physical_boxes, physical_headings)
         ],
         "progress": progress,
         "gt_progress": progress[:],
-        "gt_path_corners": [
-            np.asarray(item, dtype=float).tolist() for item in gt_corners
-        ],
+        "gt_path_corners": [np.asarray(item, dtype=float).tolist() for item in gt_corners],
         "reasoning": reasoning,
         "final_iou": final_iou,
         "path_length": len(physical_boxes),
         "success": bool(final_iou > 0.3),
         "search_steps": search_steps,
-        "ins_sessions": [session.to_dict() for session in sessions],
-        "execution_windows": [window.to_dict() for window in execution_windows],
-        "search_runs": search_runs,
-        "confirmation_runs": confirmation_runs,
         "event_progress": event_progress,
-        "observation_views": unique_views,
-        "state_updates": _state_updates(plan),
+        "completed_event_ids": completed_event_ids,
         "terminated": terminated,
         "termination_reason": termination_reason,
+        "final_target_grounding": final_target_grounding,
     }
-
-
-def execute_instruction_plan(
-    plan: InstructionPlan,
-    observation: Dict[str, Any],
-    *,
-    execution_mode: str = "legacy",
-    out_dir: Optional[Path] = None,
-    search_scale: float = SEARCH_SCALE_FACTOR,
-    step_meters: float = SEARCH_STEP_METERS,
-    max_search_steps: int = MAX_SEARCH_STEPS,
-    max_window_runs: int = MAX_WINDOW_RUNS,
-    heading_tolerance_deg: float = HEADING_TOLERANCE_DEG,
-    api_key: str = QWEN_API_KEY,
-    url: str = QWEN_URL,
-    model: str = QWEN_MODEL,
-    enable_confirmation: bool = True,
-    engine=None,
-) -> Dict[str, Any]:
-    common = dict(
-        out_dir=out_dir,
-        search_scale=search_scale,
-        step_meters=step_meters,
-        max_search_steps=max_search_steps,
-        api_key=api_key,
-        url=url,
-        model=model,
-        enable_confirmation=enable_confirmation,
-        engine=engine,
-    )
-    if execution_mode == "legacy":
-        return execute_instruction_plan_legacy(plan, observation, **common)
-    if execution_mode == "ins-window":
-        return execute_instruction_plan_windowed(
-            plan,
-            observation,
-            max_window_runs=max_window_runs,
-            heading_tolerance_deg=heading_tolerance_deg,
-            **common,
-        )
-    raise ValueError("execution_mode must be legacy or ins-window")
 
 
 def load_instruction_plans(path: Path = PLANS_PATH) -> Dict[str, Dict[str, Any]]:
@@ -1856,14 +910,10 @@ def load_instruction_plans(path: Path = PLANS_PATH) -> Dict[str, Dict[str, Any]]
                 )
             plan_id = str(raw.get("plan_id") or "").strip()
             if not plan_id:
-                raise ValueError(
-                    f"instruction plan at line {line_number} has no plan_id"
-                )
+                raise ValueError(f"instruction plan at line {line_number} has no plan_id")
             turns = raw.get("turns") if isinstance(raw.get("turns"), list) else []
             try:
-                plan = InstructionPlan.from_dict(
-                    raw["plan"], plan_id=plan_id, turns=turns
-                )
+                plan = InstructionPlan.from_dict(raw["plan"], plan_id=plan_id, turns=turns)
             except ValueError as exc:
                 raise ValueError(
                     f"instruction plan at line {line_number} ({plan_id}) is invalid: {exc}"
@@ -1878,14 +928,11 @@ def load_instruction_plans(path: Path = PLANS_PATH) -> Dict[str, Dict[str, Any]]
 
 
 def _selection_bounds(
-    max_routes: Optional[int],
-    route_range: Optional[Tuple[int, int]],
+    max_routes: Optional[int], route_range: Optional[Tuple[int, int]]
 ) -> Tuple[int, Optional[int]]:
     if max_routes is not None:
         if max_routes <= 0 or route_range is not None:
-            raise ValueError(
-                "max_routes must be positive and cannot be combined with route_range"
-            )
+            raise ValueError("max_routes must be positive and cannot be combined with route_range")
         return 1, max_routes
     if route_range is None:
         return 1, None
@@ -1899,19 +946,12 @@ def _aggregate_metrics(predictions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]
     values = list(predictions.values())
     return {
         "processed_routes": len(values),
-        "success_rate": (
-            float(np.mean([item["success"] for item in values])) if values else 0.0
-        ),
-        "avg_iou": (
-            float(np.mean([item["final_iou"] for item in values])) if values else 0.0
-        ),
+        "success_rate": float(np.mean([item["success"] for item in values])) if values else 0.0,
+        "avg_iou": float(np.mean([item["final_iou"] for item in values])) if values else 0.0,
         "avg_path_length": (
-            float(np.mean([item["path_length"] for item in values]))
-            if values else 0.0
+            float(np.mean([item["path_length"] for item in values])) if values else 0.0
         ),
-        "terminated_routes": sum(
-            item.get("terminated") is True for item in values
-        ),
+        "terminated_routes": sum(item.get("terminated") is True for item in values),
     }
 
 
@@ -1922,28 +962,32 @@ def run_instruction_plans(
     plans_path: Path = PLANS_PATH,
     out_dir: Optional[Path] = None,
     *,
-    execution_mode: str = "legacy",
-    search_scale: float = SEARCH_SCALE_FACTOR,
-    step_meters: float = SEARCH_STEP_METERS,
-    max_search_steps: int = MAX_SEARCH_STEPS,
-    max_window_runs: int = MAX_WINDOW_RUNS,
-    heading_tolerance_deg: float = HEADING_TOLERANCE_DEG,
+    motion_only_meters: float = MOTION_ONLY_METERS,
     api_key: str = QWEN_API_KEY,
     url: str = QWEN_URL,
     model: str = QWEN_MODEL,
-    enable_confirmation: bool = True,
+    grounding_backend: str = GROUNDING_BACKEND,
+    vision_tool_url: str = VISION_TOOL_URL,
+    max_tool_calls: int = MAX_TOOL_CALLS,
+    qwen_api_timeout: float = QWEN_API_TIMEOUT,
+    reach_phase: str = "all",
+    event_id: Optional[str] = None,
+    selection_replay: Optional[Path] = None,
     max_routes: Optional[int] = None,
     route_range: Optional[Tuple[int, int]] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
     selected_start, selected_end = _selection_bounds(max_routes, route_range)
-    runtime = _load_baseline_engine()
-    if execution_mode not in {"legacy", "ins-window"}:
-        raise ValueError("execution_mode must be legacy or ins-window")
-    out_dir = Path(
-        out_dir
-        or (WINDOWED_OUT_DIR if execution_mode == "ins-window" else OUT_DIR)
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
+    runtime = _load_search_engine()
+    grounding_health: Dict[str, Any] = {}
+    preflight = getattr(runtime, "preflight_visual_grounding", None)
+    if callable(preflight):
+        grounding_health = preflight(
+            vision_tool_url=vision_tool_url,
+            grounding_backend=grounding_backend,
+            qwen_api_timeout=qwen_api_timeout,
+        )
+    output_dir = Path(out_dir or OUT_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
     plan_records = load_instruction_plans(plans_path)
     environment = runtime.ANDHNavBatch(
         anno_dir=str(anno_dir),
@@ -1974,56 +1018,44 @@ def run_instruction_plans(
             f"{observation.get('route_index', dataset_ordinal - 1)}"
         )
         if plan_id not in plan_records:
-            raise ValueError(
-                f"selected route {plan_id} has no InstructionPlan in {plans_path}"
-            )
+            raise ValueError(f"selected route {plan_id} has no InstructionPlan in {plans_path}")
         plan = plan_records[plan_id]["plan"]
-        route_dir = out_dir / plan_id
-        if execution_mode == "ins-window":
-            preview_sessions, _ = build_ins_sessions(
-                plan,
-                HeadingState(
-                    float(observation.get("starting_angle") or 0.0),
-                    float(observation.get("starting_angle") or 0.0),
-                ),
-                heading_tolerance_deg=heading_tolerance_deg,
-            )
-            unit_count = sum(len(item.windows) for item in preview_sessions)
-            unit_label = "windows"
-        else:
-            unit_count = len(project_instruction_plan(plan))
-            unit_label = "steps"
-        _console(
-            "ROUTE/START",
-            f"route={plan_id} mode={execution_mode} "
-            f"{unit_label}={unit_count}",
-        )
+        route_dir = output_dir / plan_id
+        _console("ROUTE/START", f"route={plan_id} events={len(plan.events)}")
         prediction = execute_instruction_plan(
             plan,
             observation,
-            execution_mode=execution_mode,
             out_dir=route_dir,
-            search_scale=search_scale,
-            step_meters=step_meters,
-            max_search_steps=max_search_steps,
-            max_window_runs=max_window_runs,
-            heading_tolerance_deg=heading_tolerance_deg,
+            motion_only_meters=motion_only_meters,
             api_key=api_key,
             url=url,
             model=model,
-            enable_confirmation=enable_confirmation,
+            grounding_backend=grounding_backend,
+            vision_tool_url=vision_tool_url,
+            max_tool_calls=max_tool_calls,
+            qwen_api_timeout=qwen_api_timeout,
+            reach_phase=reach_phase,
+            event_id=event_id,
+            selection_replay=selection_replay,
             engine=runtime,
         )
+        prediction["grounding"] = {
+            "mode": "tool-agent",
+            "model": model,
+            "backend": grounding_backend,
+            "view_scales": {"main": 5.0},
+            "max_candidates_per_view": 12,
+            "max_tool_calls": int(max_tool_calls),
+            "qwen_api_timeout_seconds": float(qwen_api_timeout),
+            "service_health": grounding_health,
+        }
         predictions[plan_id] = prediction
         route_dir.mkdir(parents=True, exist_ok=True)
         (route_dir / "prediction.json").write_text(
             json.dumps(_jsonable(prediction), ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        boxes = [
-            np.asarray(item[0], dtype=float)
-            for item in prediction["path_corners"]
-        ]
+        boxes = [np.asarray(item[0], dtype=float) for item in prediction["path_corners"]]
         runtime.save_traj_boxes_debug_image(
             tif_dataset_dir=str(Path(dataset_dir) / "train_images"),
             map_name=str(observation.get("map_name") or ""),
@@ -2042,15 +1074,13 @@ def run_instruction_plans(
     metrics = _aggregate_metrics(predictions)
     if predictions:
         try:
-            environment_metrics, _ = environment.eval_metrics(
-                predictions, human_att_eval=False
-            )
+            environment_metrics, _ = environment.eval_metrics(predictions, human_att_eval=False)
         except Exception as exc:
             environment_metrics = {"evaluation_error": str(exc)}
     else:
         environment_metrics = {"evaluation_skipped": "no_predictions"}
     metrics["environment_metrics"] = _jsonable(environment_metrics)
-    output_path = out_dir / "turn_and_crop_eval_results_full_traj.json"
+    output_path = output_dir / "turn_and_crop_eval_results_full_traj.json"
     output_path.write_text(
         json.dumps(
             _jsonable({"predictions": predictions, "metrics": metrics}),
@@ -2073,13 +1103,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
-def _nonnegative_float(value: str) -> float:
+def _positive_float(value: str) -> float:
     try:
         parsed = float(value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError("must be a number") from exc
-    if not math.isfinite(parsed) or parsed < 0.0:
-        raise argparse.ArgumentTypeError("must be a finite non-negative number")
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("must be a finite positive number")
     return parsed
 
 
@@ -2095,35 +1125,41 @@ def _parse_route_range(value: str) -> Tuple[int, int]:
 
 def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Execute InstructionPlans with legacy or same-heading-window "
-            "Search/Confirmation."
-        ),
+        description="Execute parsed navigation events sequentially with Qwen + SAM3 grounding.",
     )
     selection = parser.add_mutually_exclusive_group()
     selection.add_argument("--max-routes", type=_positive_int, default=None)
     selection.add_argument("--route-range", type=_parse_route_range, default=None)
-    parser.add_argument(
-        "--execution-mode",
-        choices=("legacy", "ins-window"),
-        default="legacy",
-    )
     parser.add_argument("--out-dir", type=Path, default=None)
-    parser.add_argument("--max-window-runs", type=_positive_int, default=MAX_WINDOW_RUNS)
+    parser.add_argument("--motion-only-meters", type=_positive_float, default=MOTION_ONLY_METERS)
     parser.add_argument(
-        "--confirmation",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "Enable the secondary visual and window-level Confirmation "
-            "stages (default: enabled). Use --no-confirmation to commit "
-            "Search's contiguous completed prefix directly."
-        ),
+        "--grounding-backend",
+        choices=("sam3", "grounded-sam2"),
+        default=GROUNDING_BACKEND,
+    )
+    parser.add_argument("--vision-tool-url", default=VISION_TOOL_URL)
+    parser.add_argument("--max-tool-calls", type=_positive_int, default=MAX_TOOL_CALLS)
+    parser.add_argument(
+        "--reach-phase",
+        choices=("all", "selection", "motion"),
+        default="all",
+        help="Run both stages, selection only, or motion only from a selection snapshot.",
     )
     parser.add_argument(
-        "--heading-tolerance-deg",
-        type=_nonnegative_float,
-        default=HEADING_TOLERANCE_DEG,
+        "--event-id",
+        default=None,
+        help="Target REACH/AVOID event for selection or motion-only debugging.",
+    )
+    parser.add_argument(
+        "--selection-replay",
+        type=Path,
+        default=None,
+        help="Path to selection.json or selection_log.json for --reach-phase motion.",
+    )
+    parser.add_argument(
+        "--qwen-api-timeout",
+        type=_positive_float,
+        default=QWEN_API_TIMEOUT,
     )
     return parser.parse_args(argv)
 
@@ -2131,13 +1167,17 @@ def _parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[Sequence[str]] = None) -> None:
     args = _parse_args(argv)
     _, metrics = run_instruction_plans(
-        execution_mode=args.execution_mode,
         out_dir=args.out_dir,
         max_routes=args.max_routes,
         route_range=args.route_range,
-        max_window_runs=args.max_window_runs,
-        heading_tolerance_deg=args.heading_tolerance_deg,
-        enable_confirmation=args.confirmation,
+        motion_only_meters=args.motion_only_meters,
+        grounding_backend=args.grounding_backend,
+        vision_tool_url=args.vision_tool_url,
+        max_tool_calls=args.max_tool_calls,
+        qwen_api_timeout=args.qwen_api_timeout,
+        reach_phase=args.reach_phase,
+        event_id=args.event_id,
+        selection_replay=args.selection_replay,
     )
     print(json.dumps(metrics, ensure_ascii=False, indent=2))
 

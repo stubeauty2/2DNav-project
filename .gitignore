@@ -1,8 +1,14 @@
 datasets/
 out/
 *.txt
+!PSC-AVDN/script/visual_grounding/requirements-vision.txt
 analyse_tool/
 experiments/
 tests/
+!tests/
+tests/*
+!tests/route_psc/
+tests/route_psc/*
+!tests/route_psc/test_visual_grounding_tools.py
 **/__pycache__/
 *.py[cod]

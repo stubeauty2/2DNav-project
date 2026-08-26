@@ -1,0 +1,222 @@
+<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>PSC-AVDN Sample3 当前指令解析结果</title><style>
+:root{--bg:#f4f7fb;--paper:#fff;--ink:#17243a;--muted:#65758a;--line:#d9e3ee;--blue:#256fd1;--blue-soft:#e8f1ff;--green:#087d5b;--green-soft:#e2f6ef;--orange:#b45b08;--orange-soft:#fff0dc;--purple:#6844b5;--purple-soft:#f0eaff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.62 "Segoe UI","Microsoft YaHei",sans-serif}.hero{padding:38px max(20px,calc((100vw - 1500px)/2));background:linear-gradient(135deg,#0a1728,#164d7a);color:#fff}.hero h1{font-size:40px;margin:4px 0}.hero p{max-width:980px;color:#d3dfed;margin:4px 0}.stats{display:flex;gap:24px;flex-wrap:wrap;margin-top:20px}.stats div{min-width:100px}.stats b{display:block;font-size:25px}.stats span{color:#bcd0e5;font-size:12px}main{max-width:1500px;margin:auto;padding:24px 20px 70px}.controls{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:14px}.controls label{display:grid;gap:5px;color:var(--muted)}input,select,button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);border-radius:7px;padding:9px 10px}button{cursor:pointer}.distribution{display:flex;flex-wrap:wrap;gap:7px;margin:12px 0 22px}.distribution span{background:var(--paper);border:1px solid var(--line);border-radius:99px;padding:4px 9px;color:var(--muted)}.distribution b{color:var(--ink)}.visible-count{color:var(--muted);margin-bottom:8px}.route{background:var(--paper);border:1px solid var(--line);border-radius:12px;margin:10px 0;overflow:hidden}.route[hidden]{display:none}.route>summary{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:13px 16px;cursor:pointer}.route>summary strong{font-size:17px;margin-right:auto}.route>summary>span:not(.route-number):not(.repair){color:var(--muted)}.route-number{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--blue-soft);color:var(--blue);font-weight:600}.repair{padding:3px 8px;border-radius:99px}.repair.no{background:var(--green-soft);color:var(--green)}.repair.yes{background:var(--orange-soft);color:var(--orange)}.route-body{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}.route-body>section{padding:17px;min-width:0}.route-body>section+section{border-left:1px solid var(--line)}h3{font-size:16px;margin:0 0 10px}.turns,.entities,.events{list-style:none;margin:0;padding:0}.turns li{display:grid;grid-template-columns:auto auto 1fr;gap:8px;align-items:start;margin:0 0 10px}.turns p,.entities p,.events p{margin:0}.role,.turn-index,.kind,.goal,.event-index,.event-type,.event-turn{display:inline-block;font-size:11px;border-radius:5px;padding:2px 6px;white-space:nowrap}.role.ins{background:var(--blue-soft);color:var(--blue)}.role.que{background:var(--purple-soft);color:var(--purple)}.turn-index,.event-turn{color:var(--muted);background:var(--bg)}.entities li{border-left:3px solid var(--green);padding:7px 10px;margin-bottom:8px;background:var(--green-soft)}.entities li>div{display:flex;gap:7px;align-items:center}.kind{background:var(--paper);color:var(--muted)}.goal{background:var(--orange-soft);color:var(--orange)}.events li{display:grid;grid-template-columns:auto auto auto 1fr;gap:7px;align-items:start;padding:7px 0;border-bottom:1px solid var(--line)}.event-index{background:var(--blue-soft);color:var(--blue)}.event-type{background:var(--purple-soft);color:var(--purple)}.events p{color:var(--muted);overflow-wrap:anywhere}.raw{margin-top:14px}.raw summary{cursor:pointer;color:var(--blue)}pre{background:#111d2c;color:#e8eef6;padding:13px;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:430px;overflow:auto}.empty{padding:35px;text-align:center;color:var(--muted)}footer{margin-top:28px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px}@media(max-width:900px){.controls{grid-template-columns:1fr 1fr}.route-body{grid-template-columns:1fr}.route-body>section+section{border-left:0;border-top:1px solid var(--line)}}@media(max-width:560px){.hero h1{font-size:30px}.controls{grid-template-columns:1fr}.route>summary strong{width:calc(100% - 50px)}.events li{grid-template-columns:auto auto auto}.events p{grid-column:1/-1}}
+</style></head><body>
+<header class='hero'><small>PSC-AVDN · INSTRUCTION PLAN · FORMAT 3</small><h1>PSC-AVDN Sample3 当前指令解析结果</h1><p>逐条对应展示原始完整 INS/QUE 对话、实体抽取以及采用 REACH relation 表达通过动作的时序事件。</p><div class='stats'><div><b>2</b><span>解析计划</span></div><div><b>7</b><span>实体</span></div><div><b>11</b><span>事件</span></div><div><b>0</b><span>结构修复后接受</span></div><div><b>0</b><span>解析失败</span></div></div></header>
+<main><section class='controls' aria-label='筛选'><label>搜索轨迹、指令或实体<input id='plan-search' type='search' placeholder='例如 2618__5、parking、REACH'></label><label>结构修复<select id='repair-filter'><option value=''>全部</option><option value='false'>repaired=false</option><option value='true'>repaired=true</option></select></label><label>事件类型<select id='type-filter'><option value=''>全部事件</option><option value='MOVE'>MOVE (1)</option><option value='REACH'>REACH (5)</option><option value='TURN'>TURN (5)</option></select></label><button id='expand-visible' type='button'>展开 / 折叠可见项</button></section>
+<div class='distribution' aria-label='事件类型分布'><span><b>REACH</b> 5</span><span><b>TURN</b> 5</span><span><b>MOVE</b> 1</span></div><div id='visible-count' class='visible-count'></div><section id='routes'>
+<details class="route" data-search="579__1 [ins] the i drone head east until you reach the road, after passing the destination is a house. [que] i see some containers pass the road. is the destination in my view? which direction should i go?. [ins] yes, the destination is in your view. you should turn to 8 o&#x27;clock and move forward to reach the destination. road containers near the road house visible after passing the road reach turn" data-repaired="false" data-types="REACH TURN" open>
+  <summary>
+    <span class="route-number">01</span>
+    <strong>579__1</strong>
+    <span>3 turns</span><span>3 entities</span><span>4 events</span>
+    <span>start heading=21.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>The I Drone head east until you reach the road, after passing the destination is a house.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see some containers pass the road. Is the destination in my view? Which direction should I go?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Yes, the destination is in your view. You should turn to 8 o&#x27;clock and move forward to reach the destination.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>road</code><span class='kind'>LANDMARK</span></div><p>road</p></li><li><div><code>containers</code><span class='kind'>LANDMARK</span></div><p>containers near the road</p></li><li><div><code>goal_house</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>house visible after passing the road</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=absolute 90.0° / east</p></li><li><span class='event-index'>e2</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=road (road) · relation=pass</p></li><li><span class='event-index'>e3</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 240.0° / 8:00</p></li><li><span class='event-index'>e4</span><span class='event-type'>REACH</span><span class='event-turn'>T3</span><p>entity=goal_house (house visible after passing the road) · relation=reach</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;579__1&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 21.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;road&quot;,
+      &quot;description&quot;: &quot;road&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;containers&quot;,
+      &quot;description&quot;: &quot;containers near the road&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;goal_house&quot;,
+      &quot;description&quot;: &quot;house visible after passing the road&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;absolute&quot;,
+        &quot;angle&quot;: 90.0,
+        &quot;description&quot;: &quot;east&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;road&quot;,
+      &quot;relation&quot;: &quot;pass&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 240.0,
+        &quot;clock&quot;: &quot;8:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;goal_house&quot;,
+      &quot;relation&quot;: &quot;reach&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details>
+<details class="route" data-search="2552__9 [ins] go to the forward direction then cross the road and trees then reached destination of the parking area. [que] i see multiple parking lots. am i near the destination? where should i go now?. [ins] move towards 9 o&#x27;clock direction, black colored place is your destination. [que] i see some black buildings. is the destination in my view? where should i go now? what is destination&#x27;s color and shape?. [ins] no, the destination is not in your view. move towards your 6 o&#x27;clock. the destination is a long shaped structure with dark top. road and trees parking area mentioned in turn 1 black colored place long shaped structure with dark top move reach turn" data-repaired="false" data-types="MOVE REACH TURN" open>
+  <summary>
+    <span class="route-number">02</span>
+    <strong>2552__9</strong>
+    <span>5 turns</span><span>4 entities</span><span>7 events</span>
+    <span>start heading=258.0°</span>
+    <span class="repair no">repaired=false</span>
+  </summary>
+  <div class="route-body">
+    <section><h3>原始指令</h3><ol class="turns"><li><span class='role ins'>INS</span><span class='turn-index'>T1</span><p>Go to the forward direction then cross the road and trees then reached destination of the parking area.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T2</span><p>I see multiple parking lots. Am I near the destination? Where should I go now?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T3</span><p>Move towards 9 o&#x27;clock direction, black colored place is your destination.</p></li><li><span class='role que'>QUE</span><span class='turn-index'>T4</span><p>I see some black buildings. Is the destination in my view? Where should I go now? What is destination&#x27;s color and shape?.</p></li><li><span class='role ins'>INS</span><span class='turn-index'>T5</span><p>No, the destination is not in your view. Move towards your 6 o&#x27;clock. The destination is a long shaped structure with dark top.</p></li></ol></section>
+    <section>
+      <h3>Entities</h3><ul class="entities"><li><div><code>road_and_trees</code><span class='kind'>LANDMARK</span></div><p>road and trees</p></li><li><div><code>initial_parking_area</code><span class='kind'>REGION</span></div><p>parking area mentioned in turn 1</p></li><li><div><code>black_place</code><span class='kind'>REGION</span></div><p>black colored place</p></li><li><div><code>final_destination</code><span class='kind'>LANDMARK</span><span class='goal'>GOAL</span></div><p>long shaped structure with dark top</p></li></ul>
+      <h3>Ordered events</h3><ol class="events"><li><span class='event-index'>e1</span><span class='event-type'>TURN</span><span class='event-turn'>T1</span><p>direction=relative 0.0° / 12:00 / forward</p></li><li><span class='event-index'>e2</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=road_and_trees (road and trees) · relation=cross</p></li><li><span class='event-index'>e3</span><span class='event-type'>REACH</span><span class='event-turn'>T1</span><p>entity=initial_parking_area (parking area mentioned in turn 1) · relation=reach</p></li><li><span class='event-index'>e4</span><span class='event-type'>TURN</span><span class='event-turn'>T3</span><p>direction=relative 270.0° / 9:00</p></li><li><span class='event-index'>e5</span><span class='event-type'>MOVE</span><span class='event-turn'>T3</span><p>distance=limited_unspecified</p></li><li><span class='event-index'>e6</span><span class='event-type'>TURN</span><span class='event-turn'>T5</span><p>direction=relative 180.0° / 6:00</p></li><li><span class='event-index'>e7</span><span class='event-type'>REACH</span><span class='event-turn'>T5</span><p>entity=final_destination (long shaped structure with dark top) · relation=reach</p></li></ol>
+      <details class="raw"><summary>查看当前规范化 plan JSON</summary><pre>{
+  &quot;trajectory_id&quot;: &quot;2552__9&quot;,
+  &quot;starting_heading&quot;: {
+    &quot;angle&quot;: 258.0
+  },
+  &quot;entities&quot;: [
+    {
+      &quot;id&quot;: &quot;road_and_trees&quot;,
+      &quot;description&quot;: &quot;road and trees&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;initial_parking_area&quot;,
+      &quot;description&quot;: &quot;parking area mentioned in turn 1&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;black_place&quot;,
+      &quot;description&quot;: &quot;black colored place&quot;,
+      &quot;kind&quot;: &quot;REGION&quot;,
+      &quot;goal&quot;: false
+    },
+    {
+      &quot;id&quot;: &quot;final_destination&quot;,
+      &quot;description&quot;: &quot;long shaped structure with dark top&quot;,
+      &quot;kind&quot;: &quot;LANDMARK&quot;,
+      &quot;goal&quot;: true
+    }
+  ],
+  &quot;events&quot;: [
+    {
+      &quot;id&quot;: &quot;e1&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 0.0,
+        &quot;clock&quot;: &quot;12:00&quot;,
+        &quot;description&quot;: &quot;forward&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e2&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;road_and_trees&quot;,
+      &quot;relation&quot;: &quot;cross&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e3&quot;,
+      &quot;turn&quot;: 1,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;initial_parking_area&quot;,
+      &quot;relation&quot;: &quot;reach&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e4&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 270.0,
+        &quot;clock&quot;: &quot;9:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e5&quot;,
+      &quot;turn&quot;: 3,
+      &quot;type&quot;: &quot;MOVE&quot;,
+      &quot;distance&quot;: &quot;limited_unspecified&quot;
+    },
+    {
+      &quot;id&quot;: &quot;e6&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;TURN&quot;,
+      &quot;direction&quot;: {
+        &quot;frame&quot;: &quot;relative&quot;,
+        &quot;angle&quot;: 180.0,
+        &quot;clock&quot;: &quot;6:00&quot;
+      }
+    },
+    {
+      &quot;id&quot;: &quot;e7&quot;,
+      &quot;turn&quot;: 5,
+      &quot;type&quot;: &quot;REACH&quot;,
+      &quot;entity&quot;: &quot;final_destination&quot;,
+      &quot;relation&quot;: &quot;reach&quot;
+    }
+  ]
+}</pre></details>
+    </section>
+  </div>
+</details></section>
+<footer>计划来源：out\preds_out_full_sample3_no_thinking\instruction_plans.jsonl · 原指令来源：datasets\sample3\test_unseen_full_data.json · format_version=3</footer></main><script>
+(() => {
+  const search = document.getElementById('plan-search');
+  const repair = document.getElementById('repair-filter');
+  const type = document.getElementById('type-filter');
+  const count = document.getElementById('visible-count');
+  const routes = [...document.querySelectorAll('.route')];
+  function apply() {
+    const query = search.value.trim().toLowerCase();
+    let visible = 0;
+    routes.forEach(route => {
+      const okQuery = !query || route.dataset.search.includes(query);
+      const okRepair = !repair.value || route.dataset.repaired === repair.value;
+      const okType = !type.value || route.dataset.types.split(' ').includes(type.value);
+      route.hidden = !(okQuery && okRepair && okType);
+      if (!route.hidden) visible += 1;
+    });
+    count.textContent = `显示 ${visible} / ${routes.length} 条轨迹`;
+  }
+  search.addEventListener('input', apply);
+  repair.addEventListener('change', apply);
+  type.addEventListener('change', apply);
+  document.getElementById('expand-visible').addEventListener('click', () => {
+    const shouldOpen = routes.some(route => !route.hidden && !route.open);
+    routes.forEach(route => { if (!route.hidden) route.open = shouldOpen; });
+  });
+  apply();
+})();
+</script></body></html>

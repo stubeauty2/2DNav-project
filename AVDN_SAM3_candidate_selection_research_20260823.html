@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AVDN · SAM3 候选选择失败：最新方法调研与低成本改造</title>
+  <style>
+    :root{--ink:#182334;--muted:#607084;--paper:#f4f7fa;--card:#fff;--line:#d8e1ea;--navy:#143858;--blue:#266ca5;--teal:#0b7a76;--green:#197047;--amber:#a26008;--red:#a63b3b;--violet:#6b50a5;--shadow:0 12px 34px rgba(24,50,79,.08)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.68 Inter,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}code,pre{font-family:"Cascadia Code",Consolas,monospace}code{background:#edf3f8;padding:.1em .35em;border-radius:5px;font-size:.91em}pre{margin:12px 0;padding:15px 17px;background:#102033;color:#e7eff7;border-radius:10px;overflow:auto;line-height:1.55;font-size:12.7px}
+    .hero{color:#fff;background:linear-gradient(126deg,#102d49 0%,#145777 52%,#087a73 100%);padding:54px 24px 46px}.hero-inner,.page,.footer{max-width:1200px;margin:auto}.eyebrow{font-size:12px;letter-spacing:.13em;text-transform:uppercase;opacity:.8}.hero h1{font-size:clamp(30px,4.2vw,50px);line-height:1.16;margin:11px 0 14px;max-width:1060px}.hero p{font-size:17px;max-width:1000px;opacity:.92}.hero-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:24px}.hero-meta span{border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.08);padding:6px 11px;border-radius:999px;font-size:13px}
+    .page{padding:25px 20px 65px}.toc,.section{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:15px}.toc{padding:18px 22px;margin:-42px 0 25px;position:relative}.toc strong{display:block;margin-bottom:8px}.toc-links{display:flex;flex-wrap:wrap;gap:8px 17px;font-size:14px}.section{padding:27px 29px;margin:20px 0}.section h2{font-size:25px;color:var(--navy);margin:0 0 17px}.section h3{font-size:19px;color:#244d70;margin:24px 0 10px}.section h4{font-size:16px;margin:17px 0 7px}.lead{font-size:17px}.muted{color:var(--muted)}.small{font-size:12.5px}.nowrap{white-space:nowrap}
+    .grid{display:grid;gap:14px}.grid-4{grid-template-columns:repeat(4,1fr)}.grid-3{grid-template-columns:repeat(3,1fr)}.two{display:grid;grid-template-columns:1fr 1fr;gap:15px}.metric,.mini{border:1px solid var(--line);border-radius:12px;padding:15px;background:#fafcff}.metric b{display:block;font-size:21px;color:var(--navy);margin:2px 0}.metric span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.metric.good{border-top:4px solid var(--green)}.metric.info{border-top:4px solid var(--blue)}.metric.warn{border-top:4px solid var(--amber)}.metric.bad{border-top:4px solid var(--red)}.mini h4{margin:0 0 6px;color:#345d7b}
+    .callout{border-left:5px solid var(--blue);background:#f0f7fc;border-radius:8px;padding:14px 17px;margin:15px 0}.callout.green{border-color:var(--green);background:#eef9f3}.callout.amber{border-color:var(--amber);background:#fff8e9}.callout.red{border-color:var(--red);background:#fff1f1}.callout.violet{border-color:var(--violet);background:#f6f2ff}
+    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:11px;overflow:hidden;margin:14px 0;font-size:13.2px}th,td{padding:10px 11px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#edf3f8;color:#314a62;font-size:12.8px}tr:last-child td{border-bottom:0}tbody tr:hover{background:#fafcff}.rank{font-weight:800;color:var(--navy)}
+    .tag{display:inline-block;padding:2px 7px;border-radius:999px;font-size:10.8px;font-weight:700;margin:1px 3px 1px 0;white-space:nowrap}.p0{background:#dff5e9;color:#17633f}.p1{background:#e2effb;color:#1e5b91}.p2{background:#fff0cd;color:#8a5605}.p3{background:#f8dddd;color:#923434}.venue{background:#e9e7fb;color:#51438d}.yes{background:#dcfce7;color:#166534}.partial{background:#fef3c7;color:#92400e}.no{background:#fee2e2;color:#991b1b}.trainfree{background:#dff4f3;color:#126664}
+    .flow{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin:18px 0}.node{border:1px solid #c9d8e6;background:#f9fbfd;border-radius:11px;padding:13px 8px;text-align:center;font-size:12.4px;position:relative}.node strong{display:block;color:var(--navy);font-size:13.5px}.node:not(:last-child):after{content:"→";position:absolute;right:-11px;top:34%;z-index:2;color:#7790a4;font-size:18px}.node.new{border-color:#bba6e2;background:#f8f4ff}.node.hot{border-color:#79c6c0;background:#effbf9}.node.warn{border-color:#dfbc72;background:#fffaf0}
+    .method{border:1px solid var(--line);border-radius:13px;padding:18px 20px;margin:15px 0}.method-head{display:flex;justify-content:space-between;align-items:flex-start;gap:15px}.method h3{margin:0 0 5px;color:var(--navy)}.score{font-size:23px;font-weight:800;color:var(--green);white-space:nowrap}.section ul,.section ol,.method ul{padding-left:21px}.section li,.method li{margin:5px 0}.check{color:var(--green);font-weight:700}.cross{color:var(--red);font-weight:700}.formula{background:#f4f7fb;border:1px dashed #bccddd;border-radius:10px;padding:13px 15px;margin:12px 0;font-family:"Cascadia Code",Consolas,monospace;font-size:13px}
+    details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fcfdff}summary{cursor:pointer;padding:11px 14px;font-weight:700;color:#315672}details>div{padding:0 14px 13px}.footer{padding:0 22px 45px;color:var(--muted);font-size:12px}
+    @media(max-width:950px){.grid-4,.grid-3,.two{grid-template-columns:1fr 1fr}.flow{grid-template-columns:repeat(2,1fr)}.node:after{display:none}.section{padding:22px 19px}.method-head{display:block}.score{margin-top:6px}}
+    @media(max-width:620px){.grid-4,.grid-3,.two,.flow{grid-template-columns:1fr}.hero{padding:42px 18px}.page{padding-left:12px;padding-right:12px}.toc{margin-top:-28px}th,td{padding:8px;font-size:11.8px}}
+    @media print{body{background:#fff}.toc,.section{box-shadow:none}.section,.method{break-inside:avoid}.page{max-width:none;padding:12px}.footer{padding-bottom:0}a{color:inherit;text-decoration:underline}}
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="eyebrow">Focused research brief · visual grounding · proposal selection</div>
+      <h1>SAM3 候选能生成，但 Agent 总是选错：最新方法与低成本改造</h1>
+      <p>针对当前 PSC‑AVDN 的 <strong>SAM3 proposals → Qwen 候选 ID 选择</strong>链路，检索并核查 AAAI / ICML / ICLR / NeurIPS / CVPR / ACL 及紧密相关顶会的 2025–2026 工作。报告把“是否相关”进一步拆成：是否正面解决相似干扰项、是否支持拒答、源码是否完整、能否只改选择层而不重训。</p>
+      <div class="hero-meta"><span>调研快照：2026‑08‑23</span><span>重点论文：14</span><span>最高优先级：RefChess‑Lite</span><span>首轮无需训练</span></div>
+    </div>
+  </header>
+
+  <main class="page">
+    <nav class="toc">
+      <strong>报告导航</strong>
+      <div class="toc-links"><a href="#answer">结论</a><a href="#diagnosis">代码诊断</a><a href="#landscape">论文排名</a><a href="#details">重点方法</a><a href="#code-audit">源码审计</a><a href="#design">推荐架构</a><a href="#experiments">实验路线</a><a href="#metrics">评测</a><a href="#sources">来源</a></div>
+    </nav>
+
+    <section class="section" id="answer">
+      <h2>1. 结论：有，而且已有一篇方法几乎与当前问题同构</h2>
+      <p class="lead"><strong>ICML 2026 的 RefChess 是最直接答案。</strong>它明确研究“先由 SAM 生成 class‑agnostic proposals，再从相似干扰项中选对 referring target”；核心结论是，不能独立给每个候选打分，而要考察候选在加入不同干扰上下文后是否仍保持稳定。官方代码已发布，且方法本身训练自由。</p>
+      <div class="grid grid-4">
+        <div class="metric good"><span>P0 主线</span><b>RefChess‑Lite</b>干扰项感知的候选重排</div>
+        <div class="metric good"><span>P0 表示层</span><b>TGS‑Lite</b>先把目标重写成显式对象签名</div>
+        <div class="metric info"><span>P0 恢复层</span><b>DiMo / RegionFocus</b>低置信度时逐级裁剪补看</div>
+        <div class="metric warn"><span>P0 安全层</span><b>PostAlign / GroundingME</b>允许“没有可靠候选”</div>
+      </div>
+      <div class="callout green"><strong>最推荐的论文切入点：</strong>冻结 SAM3 与 Qwen 主干，把当前单次“看候选拼图选 ID”替换为 <em>候选证据恢复 → 同类干扰项对比 → 多次轻量投票 → margin 校验 → 低置信度裁剪/拒答</em>。这条路线改动集中、可做清晰消融，也最容易证明提升来自“选择”而不是 proposal recall。</div>
+      <h3>一句话优先级</h3>
+      <ol>
+        <li><strong>先做：</strong>恢复候选 score/bbox/局部 crop，NMS 后把 12 个拥挤候选缩到 4 个；不加模型即可验证接口问题。</li>
+        <li><strong>再做：</strong>移植 RefChess 的“候选对干扰上下文稳定性”思想，先实现 pairwise/tournament 轻量版，不立即跑 2048 次 MCTS。</li>
+        <li><strong>补可靠性：</strong>top‑1 与 top‑2 差距小、跨视图不一致或所有语义分低时，不强制选 ID，触发一次 zoom/requery。</li>
+        <li><strong>中期分支：</strong>若选择器仍是瓶颈，再评估 UGround / AnchorSeg / SaFiRe / LISAt 等需要大模型或训练的直接文本到 mask 方法。</li>
+      </ol>
+    </section>
+
+    <section class="section" id="diagnosis">
+      <h2>2. 当前代码诊断：错误更像“证据接口失败”，不只是模型能力不足</h2>
+      <div class="two">
+        <div class="mini"><h4>后端其实已经有证据</h4><ul><li><code>RawProposal</code> 包含 <code>score</code>、<code>mask_quality</code>、<code>component_scores</code>。</li><li>SAM3 后端保留其 confidence；Grounded‑SAM2 分别保留 GroundingDINO score 与 SAM2 IoU quality。</li><li>项目已有 <code>DinoV3Matcher</code>，可做跨尺度/跨视图相似性与几何一致性校验。</li></ul></div>
+        <div class="mini"><h4>选择 Agent 却看不到这些</h4><ul><li><code>_compact_visual_candidate</code> 只返回 ID、concept、role 与 forward sector。</li><li>bbox、mask path、后端分数和 mask 质量都未进入机器可读选择上下文。</li><li>模型只能在一张候选拼图上把小标签与 mask 对号入座；最多每视图 12 个候选。</li></ul></div>
+      </div>
+      <table>
+        <thead><tr><th>代码位置</th><th>当前行为</th><th>为何会选错</th><th>建议</th></tr></thead>
+        <tbody>
+          <tr><td><code>grounding_agent.py:97</code></td><td>压缩候选字段</td><td>把可用于排序、校准和审计的证据丢掉</td><td>新增 <code>bbox_2d / area_ratio / score / mask_quality / crop_path</code></td></tr>
+          <tr><td><code>grounding_agent.py:183</code></td><td><code>find_visual_candidates</code> 生成候选并返回拼图</td><td>相似目标在同一图中互相干扰；小目标被缩得更小</td><td>生成每候选等分辨率 crop card；先 NMS，再分批 top‑4</td></tr>
+          <tr><td><code>grounding_agent.py:214</code></td><td><code>finish_target_selection</code> 接收自报 confidence</td><td>confidence 没有校准，也无 top‑2 margin / 外部 verifier</td><td>系统计算 margin、一致性与 rejection gate</td></tr>
+          <tr><td><code>grounding_agent.py:620–659</code></td><td>单张 768×768 scale‑5；身份判断同时使用 forward sector</td><td>方向信息可能在目标身份无空间限定时形成位置偏置</td><td>只有表达式包含空间关系时才启用关系分数</td></tr>
+          <tr><td><code>matcher.py:16</code></td><td>DINOv3 matcher 已存在但未参与最终 selection</td><td>错失跨尺度/跨视图验证信号</td><td>作为 consistency 项，不把它误当文本语义编码器</td></tr>
+        </tbody>
+      </table>
+      <div class="callout red"><strong>必须先区分两种错误：</strong>① SAM3 候选集合里根本没有真目标（proposal miss）；② 真目标已在候选里但 Agent 选错（selection error）。如果不分别统计 Proposal Recall@K 与 Selection Accuracy | Recall，就无法判断论文方法是否真的解决了当前瓶颈。</div>
+    </section>
+
+    <section class="section" id="landscape">
+      <h2>3. 最新论文排名：对当前 SAM3 候选选择的可迁移性</h2>
+      <table>
+        <thead><tr><th>#</th><th>论文 / 会议</th><th>解决的关键问题</th><th>官方源码状态</th><th>对当前项目</th><th>建议</th></tr></thead>
+        <tbody>
+          <tr><td class="rank">1</td><td><a href="https://openreview.net/forum?id=RESRoG7nvd">RefChess</a><br><span class="tag venue">ICML 2026</span><span class="tag trainfree">训练自由</span></td><td>SAM proposals 被相似干扰项误导；以 contextual perturbation + MCTS 选稳定候选</td><td><span class="tag partial">可运行，MCTS 需审查</span><br><a href="https://github.com/Tongshiyan/RefChess">GitHub</a>；单图 demo、评测、trace 均有</td><td><strong>问题同构</strong>；scorer 可复用，但公开 MCTS 并未对主候选做真正的上下文重算</td><td><span class="tag p0">P0</span>移植 parser/scorer，重写 contextual rerank</td></tr>
+          <tr><td class="rank">2</td><td><a href="https://aclanthology.org/2025.emnlp-main.1334/">DiMo‑GUI</a><br><span class="tag venue">EMNLP 2025</span><span class="tag trainfree">训练自由</span></td><td>拥挤画面中动态 zoom；分离不同候选模态；动态停止</td><td><span class="tag partial">代码可用，关键参数未完全接线</span><br><a href="https://github.com/vivo/DiMo-GUI">GitHub</a></td><td><code>RegionTraverser</code> 可直接借；整条 text/icon 流程不宜原样搬</td><td><span class="tag p0">P0</span>只抽取 crop/坐标映射</td></tr>
+          <tr><td class="rank">3</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Zhang_Breaking_the_Regional_Perception_Bottleneck_of_Multimodal_Large_Language_Models_CVPR_2026_paper.html">R‑Ground</a><br><span class="tag venue">CVPR 2026</span></td><td>区域推理阶段扩展；feature‑alignment node score + region weighted voting</td><td><span class="tag no">未发现公开实现</span></td><td>适合把“单次选 ID”改成多轨迹有权投票</td><td><span class="tag p0">P0‑Lite</span>借机制，不复刻完整 MCTS</td></tr>
+          <tr><td class="rank">4</td><td><a href="https://proceedings.iclr.cc/paper_files/paper/2026/hash/7f52f6b8f107931127eefe15429ee278-Abstract-Conference.html">PostAlign</a><br><span class="tag venue">ICLR 2026</span></td><td>负样本拒绝 + 按查询复杂度选择推理策略，抑制视觉幻觉</td><td><span class="tag no">未发现官方代码</span></td><td>直接补上“候选都不对时仍被迫选择”的漏洞</td><td><span class="tag p0">P0‑Lite</span>实现 rejection gate</td></tr>
+          <tr><td class="rank">5</td><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/38373">TGS‑Agent</a><br><span class="tag venue">AAAI 2026</span></td><td>Think → Ground → Segment；先生成显式对象描述再调用检测/分割</td><td><span class="tag yes">代码+权重</span><br><a href="https://github.com/jasongief/TGS-Agent">GitHub</a></td><td>适合把长对话目标压缩成可检验对象签名</td><td><span class="tag p0">P0‑Lite</span>只借 object‑signature，不装完整音视频栈</td></tr>
+          <tr><td class="rank">6</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Li_GroundingME_Exposing_the_Visual_Grounding_Gap_in_MLLMs_through_Multi-Dimensional_CVPR_2026_paper.html">GroundingME</a><br><span class="tag venue">CVPR 2026</span></td><td>Discriminative / Spatial / Limited / Rejection 四类真实 grounding 缺口</td><td><span class="tag partial">评测可用，解析需修正</span><br><a href="https://github.com/lirang04/GroundingME">GitHub</a></td><td>适合建立错误分类；原解析会把格式失败和 null 都映射为零框</td><td><span class="tag p0">P0‑Eval</span>借 taxonomy，修复 parse validity</td></tr>
+          <tr><td class="rank">7</td><td><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/0a8d149749e6d4d28fb8c8c2f70fd05a-Abstract-Conference.html">SaFiRe</a><br><span class="tag venue">NeurIPS 2025</span></td><td>object‑distracting 与 category‑implicit referring ambiguity；全局扫描后局部凝视</td><td><span class="tag yes">模型+checkpoint</span><br><a href="https://github.com/zhenjiemao/SaFiRe">GitHub</a>；<a href="https://github.com/zhenjiemao/aRefCOCO">aRefCOCO</a></td><td>问题极相关，但官方实现偏训练型、依赖 VMamba</td><td><span class="tag p1">P1</span>先用 aRefCOCO 思路构造难例</td></tr>
+          <tr><td class="rank">8</td><td><a href="https://openaccess.thecvf.com/content/ICCV2025/html/Luo_Visual_Test-time_Scaling_for_GUI_Agent_Grounding_ICCV_2025_paper.html">RegionFocus</a><br><span class="tag venue">ICCV 2025</span><span class="tag trainfree">训练自由</span></td><td>错误触发的区域缩放、多局部预测与汇总</td><td><span class="tag yes">公开代码</span><br><a href="https://github.com/tiangeluo/RegionFocus">GitHub</a></td><td>可作为动态 crop 的直接工程参考</td><td><span class="tag p1">P1</span>避免照搬多 GPU / 72B 配置</td></tr>
+          <tr><td class="rank">9</td><td><a href="https://aclanthology.org/2026.acl-long.938/">AnchorSeg</a><br><span class="tag venue">ACL 2026</span></td><td>把“是什么”与“在哪里”从单一 SEG token 中解耦；query banks + spatial anchor</td><td><span class="tag yes">代码+模型</span><br><a href="https://github.com/rui-qian/AnchorSeg">GitHub</a></td><td>直接文本到 mask 的强替代路线，但迁移成本高</td><td><span class="tag p2">P2</span>中期 sidecar baseline</td></tr>
+          <tr><td class="rank">10</td><td><a href="https://github.com/rui-qian/UGround">UGround</a><br><span class="tag venue">ICML 2026</span></td><td>以中间层 similarity map 作为 SAM soft mask prompt；覆盖 false‑premise / empty target</td><td><span class="tag yes">代码+7B/13B模型</span></td><td>比“VLM 选 ID”更端到端，但模型与训练栈较重</td><td><span class="tag p2">P2</span>若 P0 饱和再测</td></tr>
+          <tr><td class="rank">11</td><td><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/a38a009bb015775b7685b5ef3c206310-Abstract-Datasets_and_Benchmarks_Track.html">LISAt</a><br><span class="tag venue">NeurIPS 2025</span></td><td>遥感场景的语言推理分割；GRES / PreGRES</td><td><span class="tag yes">代码+7B模型+数据</span><br><a href="https://github.com/lisat-bair/LISAt_code">GitHub</a></td><td>领域相关，但卫星图像与 AVDN 低空视角仍有 domain gap；A100 推荐</td><td><span class="tag p2">P2</span>数据/LoRA 参考优于直接替换</td></tr>
+          <tr><td class="rank">12</td><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/38181">RIS‑LAD</a><br><span class="tag venue">AAAI 2026</span></td><td>低空无人机、小目标、密集同类实例；category drift / object drift</td><td><span class="tag partial">数据可用，模型代码仍 coming soon</span><br><a href="https://github.com/AHideoKuzeA/RIS-LAD">GitHub</a></td><td><strong>领域最贴近</strong>，但暂时不能快速复现模型</td><td><span class="tag p1">P1‑Eval</span>借失败定义与数据</td></tr>
+          <tr><td class="rank">13</td><td><a href="https://openaccess.thecvf.com/content/CVPR2025/html/Wei_HyperSeg_Hybrid_Segmentation_Assistant_with_Fine-grained_Visual_Perceiver_CVPR_2025_paper.html">HyperSeg</a><br><span class="tag venue">CVPR 2025</span></td><td>通用/指代/推理分割，细粒度多尺度视觉 perceiver</td><td><span class="tag yes">代码</span><br><a href="https://github.com/congvvc/HyperSeg">GitHub</a></td><td>需 Mipha‑3B、SigLIP、Mask2Former，环境较重</td><td><span class="tag p3">P3</span>不作为首轮</td></tr>
+          <tr><td class="rank">14</td><td><a href="https://openaccess.thecvf.com/content/CVPR2025/html/Wu_F-LMM_Grounding_Frozen_Large_Multimodal_Models_CVPR_2025_paper.html">F‑LMM</a><br><span class="tag venue">CVPR 2025</span></td><td>冻结 LMM，以轻量 CNN 将 word‑pixel attention 转为 mask，再由 SAM 精修</td><td><span class="tag partial">训练/评测/权重可用</span><br><a href="https://github.com/wusize/F-LMM">GitHub</a></td><td>可做直接 mask sidecar；Xtuner/MMEngine 版本约束明显</td><td><span class="tag p2">P2</span>中成本替代分支</td></tr>
+        </tbody>
+      </table>
+      <p class="small muted">注：“未发现官方代码”表示在本次快照中，论文官方页面、作者项目页与常规官方仓库检索未找到可执行实现，不等于作者未来不会发布。RIS‑LAD 仓库截至快照明确显示 Model &amp; Code coming soon。</p>
+    </section>
+
+    <section class="section" id="details">
+      <h2>4. 最值得迁移的五条方法线</h2>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.1 RefChess：从“独立打分”升级为“干扰上下文稳定性”</h3><span class="tag venue">ICML 2026</span><span class="tag trainfree">训练自由</span><span class="tag p0">最优先</span></div><div class="score">适配 9.5/10</div></div>
+        <p>RefChess 先用 SAM 生成 proposals，再结合 FG‑CLIP / GEM、语言约束和区域证据打分，最后用 MCTS 搜索在不同 distractor contexts 下仍稳定的 proposal。论文动机与当前问题完全一致：相似候选经常局部满足表达式，若逐候选独立判断，很容易把“看起来也像”的区域选成目标。</p>
+        <ul><li><strong>可直接复用：</strong>语言约束解析、proposal 特征/文本相关性、context perturbation、trace 与坏例保存。</li><li><strong>不能原样快速塞入：</strong>官方 demo 默认 SAM ViT‑H，FG‑CLIP/GEM，<code>--sims 2048 --rollout-depth 10</code>；requirements 很重。</li><li><strong>建议裁剪：</strong>保留当前 SAM3 proposals，只对 top‑4 做两两上下文比较或 16–64 次轻量搜索；先不替换 SAM3，也不跑全量 RefCOCO 评测。</li></ul>
+        <div class="callout violet"><strong>RefChess‑Lite：</strong>对每个候选分别计算“单独语义分”和“与同类干扰项并列时的相对分”；若某候选在 3 个随机 distractor subsets 中仍排名第一，就增加 stability bonus。这样能保留论文核心，而成本远低于 2048 次 MCTS。</div>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.2 TGS‑Agent：先把“指令中的对象”说清楚，再让分割器工作</h3><span class="tag venue">AAAI 2026</span><span class="tag p0">低成本借鉴</span></div><div class="score">适配 9.0/10</div></div>
+        <p>TGS‑Agent 将过程拆成 Think → Ground → Segment：多模态 reasoner 先产出细粒度但简洁的显式对象描述，再把该描述交给 GroundingDINO 与 SAM2。当前 AVDN 的目标经常来自长对话或事件关系，直接把原句压缩成一两个短名词调用 SAM3，可能在生成候选前就丢失了关键属性。</p>
+        <ul><li><strong>应输出的 object signature：</strong>category、颜色/材质、形状/朝向、相对 anchor、排除特征、是否允许不可见。</li><li><strong>不建议安装完整仓库：</strong>其音视频 encoder、LLaMA‑2、Grounded‑SAM2 双环境与训练数据都超出当前需求。</li><li><strong>最小实现：</strong>由现有 Qwen 在调用 SAM3 前生成结构化 JSON；SAM3 query 用 category/同义词，选择器使用完整 signature。</li></ul>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.3 DiMo‑GUI / RegionFocus：候选拥挤时，不要继续看同一张缩略拼图</h3><span class="tag venue">EMNLP 2025</span><span class="tag venue">ICCV 2025</span><span class="tag trainfree">训练自由</span></div><div class="score">适配 8.8/10</div></div>
+        <p>两者虽来自 GUI agent，却击中了同一个视觉失败：大图或密集界面中目标过小、无关元素太多。DiMo‑GUI 采用 progressive zoom 与动态停止；RegionFocus 在错误/条件触发后，对多个局部区域独立预测并汇总。</p>
+        <ul><li>不要把 8–12 个 mask 都缩进单张 contact sheet；每个候选生成相同视觉预算的局部 crop。</li><li>top‑1/top‑2 margin 小时，围绕二者 bbox 放大 1.4–1.8×，让 Qwen 做二选一，不再重看全图。</li><li>如果第一次放大后排序稳定则停止；最多一轮补看，防止 test‑time scaling 失控。</li></ul>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.4 R‑Ground：多条区域推理路径不能只做多数投票</h3><span class="tag venue">CVPR 2026</span><span class="tag p0">机制迁移</span></div><div class="score">适配 8.6/10</div></div>
+        <p>R‑Ground 把 MCTS 计算集中在 semantic refinement stage，并以 multimodal feature alignment 选节点、以 regional feature weighted voting 决定最终区域。它提示一个实用原则：重复问模型三次后做无权多数投票不够，候选票应由区域—目标对齐证据加权。</p>
+        <ul><li><strong>R‑Ground‑Lite：</strong>用 3 个互补 prompt（类别属性、关系、反事实排除）各自产生排名。</li><li><strong>加权：</strong>每票乘以 SAM quality、语义分与跨视图一致性；不是模型自报 confidence。</li><li><strong>源码风险：</strong>本次未发现官方实现，因此只迁移论文级机制，不作为复现主线。</li></ul>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.5 PostAlign + GroundingME：把“拒绝选择”变成一等能力</h3><span class="tag venue">ICLR 2026</span><span class="tag venue">CVPR 2026</span></div><div class="score">适配 8.5/10</div></div>
+        <p>GroundingME 显示，即使强 MLLM 在“目标不存在”场景也普遍接近 0% rejection；PostAlign 因此显式加入 negative rejection。当前 selector 只要提交一个合法 target candidate ID 就能通过，语义上没有可靠目标时仍倾向于强选。</p>
+        <ul><li><strong>系统拒答条件：</strong>top‑1 绝对分低、top‑1/top‑2 margin 低、三路投票不一致、跨尺度匹配失败中的任意两项成立。</li><li><strong>拒答不是终止：</strong>先触发一次 query rewrite / crop / 邻近尺度；仍无证据才返回 absent/uncertain。</li><li><strong>评测：</strong>从 GroundingME 的 Discriminative、Spatial、Limited、Rejection 四维制作本地难例集。</li></ul>
+      </article>
+    </section>
+
+    <section class="section" id="code-audit">
+      <h2>5. 对应源码审计：哪些文件能借，哪些仓库不能直接搬</h2>
+      <p class="lead">下面的判断来自对官方仓库实际入口与核心函数的静态检查，而不只是 README。总体结论是：<strong>RefChess 的 scorer、DiMo‑GUI 的裁剪器、GroundingME 的 taxonomy 最值得抽取；三个整仓都需要修改后再用。</strong></p>
+
+      <table>
+        <thead><tr><th>仓库</th><th>实际关键文件 / 函数</th><th>源码观察</th><th>可复用结论</th></tr></thead>
+        <tbody>
+          <tr><td><strong>RefChess</strong></td><td><code>model/nlp.py::parse_language_constraints</code><br><code>model/backbone.py::FGCLIPBackbone</code><br><code>model/mcts.py::ProposalRepository / MCTSSolver</code></td><td>语言被拆为 subject、attribute、relation、object、location；proposal 多证据分可解释。MCTS 的主候选分预计算，rollout 只混入其他候选分数的均值/方差。</td><td><span class="check">抽 parser、FG‑CLIP scorer、score_breakdown</span><br><span class="cross">不要照搬现有 MCTS reward</span></td></tr>
+          <tr><td><strong>DiMo‑GUI</strong></td><td><code>models/utils/region_traverser.py</code><br><code>models/qwen2_5vl.py::iterative_narrowing</code></td><td>RegionTraverser 仅 150 余行，坐标映射与边界裁剪清楚。Qwen 路径硬编码 5 轮，停止条件是连续两次落点距 crop 中心 &lt;0.1。</td><td><span class="check">直接重写/复用 RegionTraverser 思路</span><br><span class="cross">不要整仓集成</span></td></tr>
+          <tr><td><strong>TGS‑Agent</strong></td><td><code>inference_hyper_lora.py</code><br><code>ground_segment_with_object_text_after_thinking_*.py</code></td><td>Think 输出通过 <code>&lt;f_object&gt;</code>/<code>&lt;s_object&gt;</code> 标签进入 JSONL；ground 脚本抽取简化描述，GroundingDINO 取 top‑1，再交 SAM2。</td><td><span class="check">借显式对象描述 schema</span><br><span class="cross">不引入音频、LLaMA‑2、HyperLoRA 全栈</span></td></tr>
+          <tr><td><strong>GroundingME</strong></td><td><code>evaluate.py</code><br><code>lmms_eval_task/groundingme/utils.py</code></td><td>OpenAI‑compatible API 评测入口简单；按 L1/L2 聚合完整。但 parser 将 null 与解析失败都变成 <code>[0,0,0,0]</code>，且会根据 GT 在多种坐标解释中选最高 IoU。</td><td><span class="check">借数据、taxonomy 与聚合表</span><br><span class="cross">重写 parser/坐标协议</span></td></tr>
+          <tr><td><strong>UGround</strong></td><td><code>model/UGround.py</code><br><code>model/PPM.py::PolicyPromptedMasking</code></td><td>LLaVA 全隐藏层 + policy/critic + similarity map → SAM mask prompt；显式 <code>seg_token_idx</code> 与 <code>rej_token_idx</code>。不是一个独立候选重排模块。</td><td><span class="check">作为独立 sidecar baseline</span><br><span class="cross">不能嵌入现有 Agent 进程</span></td></tr>
+          <tr><td><strong>AnchorSeg</strong></td><td><code>model/AnchorSeg.py</code><br><code>model/PPMv2.py</code></td><td>与 UGround 同一大型 LLaVA/SAM 框架族，增加 query banks、anchor 与训练目标；仓库提供 app/chat，但推理仍需要完整模型权重。</td><td><span class="check">单独服务化测试</span><br><span class="cross">不作为 P0 patch</span></td></tr>
+          <tr><td><strong>SaFiRe</strong></td><td><code>model/segmenter.py</code><br><code>selective_scan/</code><br><code>vmamba_model/</code></td><td>自定义 selective scan/VMamba kernel；官方训练命令只支持 DDP，多卡；checkpoint 可单卡评测。</td><td><span class="check">可做离线难例 baseline</span><br><span class="cross">不抽其网络层进当前项目</span></td></tr>
+          <tr><td><strong>LISAt</strong></td><td><code>model/LISAT.py / LISAT_eval.py</code><br><code>eval_lisat.py</code></td><td>LLaVA + RemoteCLIP + SAM + [SEG] token；README 推荐 A100/FlashAttention，完整训练与数据处理链较重。</td><td><span class="check">独立 geospatial sidecar / 数据参考</span><br><span class="cross">不直接替换 SAM3 selector</span></td></tr>
+        </tbody>
+      </table>
+
+      <h3>5.1 RefChess：论文方向正确，但公开 MCTS 实现需要二次设计</h3>
+      <div class="two">
+        <div class="mini"><h4>值得直接抽取</h4><ul><li><code>parse_language_constraints()</code> 输出 subject、attribute、relation、object noun、location tags、size preference。</li><li><code>ProposalRepository</code> 缓存 proposal crop 的 FG‑CLIP 特征，避免同一候选反复编码。</li><li><code>score_breakdown()</code> 明确返回 subj / attr / rel / obj / itm / heatmap，适合记录到现有 <code>component_scores</code>。</li><li><code>SearchRecorder</code> 与坏例可视化适合用于论文消融与审计。</li></ul></div>
+        <div class="mini"><h4>必须修改</h4><ul><li><code>_proposal_score(i)</code> 是静态加权和，不接收 context。</li><li><code>_evaluate_chain()</code> 只给 primary score 加 support mean，再减 support std。</li><li><code>_pick_neighbor()</code> 明确是 pure random，忽略空间邻近与分数。</li><li>因此公开代码更像“随机支持项正则”，还不是候选在干扰上下文中的真实重评分。</li></ul></div>
+      </div>
+      <div class="callout violet"><strong>对本项目更合理的实现：</strong>保留 RefChess 的多证据分，但将 context 设计为 top‑1 与同类候选的显式二选一 VLM 判断，或计算目标 crop 与“候选 + 干扰项联合图”的相对 logit。MCTS 只在该 context‑dependent score 确实存在后才有意义；首轮直接 tournament 更稳定、更便宜。</div>
+
+      <h3>5.2 DiMo‑GUI：裁剪器质量高于整条模型封装</h3>
+      <ul>
+        <li><code>RegionTraverser.consume_coordinate()</code> 完成 0–999 局部坐标到原图坐标的转换、以预测点为中心缩小 1/2 区域、边界修正与 crop 输出；这是最可复用的部分。</li>
+        <li><code>iterative_narrowing()</code> 将 <code>k=5</code> 写死；评测入口虽然定义 <code>--max_iter</code> 和 <code>--threshold</code>，Qwen 这条函数并未消费它们。</li>
+        <li>函数接收 <code>prompt</code> 与 <code>modality</code>，但核心循环实际调用 <code>ground_only_positive(target, image_prompt)</code>，没有传入两者；因此 deterministic Qwen 下 text/icon 两路可能产生同样结果。</li>
+        <li>停止条件不是不确定性或候选 margin，而是连续两轮预测接近当前 crop 中心；这适合 GUI point grounding，却不适合直接判断 SAM3 mask identity。</li>
+      </ul>
+      <p><strong>迁移决策：</strong>在本项目中重新写一个约 50–100 行的 bbox crop helper，直接用已有候选 bbox 驱动 zoom，并用 top‑2 margin 决定是否补看。无需引入 DiMo 的模型目录、LLaVA 副本或输出文件逻辑。</p>
+
+      <h3>5.3 TGS‑Agent：源代码证实“只借 Think 输出”最划算</h3>
+      <ul>
+        <li>ground 脚本从 Ref‑Thinker 输出中抽取 <code>f_object</code> 与 <code>s_object</code>，默认使用简化对象文本；这验证了“长推理不直接喂给 detector”的设计。</li>
+        <li>GroundingDINO 的 <code>BOX_THRESHOLD=0.1</code>、<code>TEXT_THRESHOLD=0.25</code> 被脚本硬编码，并直接 <code>boxes = boxes[:1]</code>。它没有提供可复用的多候选选择器。</li>
+        <li>完整 Think 阶段需 CLIP、BEATs、LLaMA‑2、projector 与多个 checkpoint；与当前图像目标选择相比，安装成本明显过高。</li>
+      </ul>
+      <p><strong>迁移决策：</strong>让现有 Qwen 输出 <code>{category, attributes, anchor_relation, negative_cues, short_query}</code>，等价获得 TGS 最关键的接口收益；不复制其模型和训练脚本。</p>
+
+      <h3>5.4 GroundingME：评测代码可快速用，但拒答统计必须修</h3>
+      <ul>
+        <li><code>evaluate.py</code> 仅依赖 datasets/Pillow/tqdm/OpenAI client，能直接指向本地 OpenAI‑compatible Qwen 服务。</li>
+        <li>输出格式为 <code>{"bbox_2d": null}</code> 或一个 box，适合借鉴为选择器的明确 rejection contract。</li>
+        <li>当前 <code>parse_bbox()</code> 对 JSON null、无 bbox、异常和正则失败都返回零框；在 Rejection 样本上，格式错误可能被当成正确拒答。</li>
+        <li>评测还会在原坐标、0–1、0–999、Qwen/MiMo resize 坐标中用 GT 选最优解释。做模型横评方便，但不适合部署校准。</li>
+      </ul>
+      <p><strong>迁移决策：</strong>本地 evaluator 增加 <code>parse_valid</code>、<code>explicit_null</code> 与固定坐标系；格式错误单列，不算 rejection success。</p>
+
+      <h3>5.5 环境与许可证风险</h3>
+      <table>
+        <thead><tr><th>分支</th><th>关键版本 / 依赖</th><th>与当前环境</th><th>运行建议</th><th>仓库许可证元数据</th></tr></thead>
+        <tbody>
+          <tr><td>当前视觉环境</td><td>torch ≥2.7；transformers ≥4.56；numpy ≥1.26</td><td>—</td><td>SAM3 与轻量 scorer 留在此环境</td><td>项目自身</td></tr>
+          <tr><td>RefChess</td><td>torch 2.9.1；transformers 4.57.3；spaCy 3.7；FG‑CLIP/GEM</td><td><span class="tag yes">大体兼容</span></td><td>新增加 scorer 依赖；不安装其 bundled SAM</td><td><span class="tag no">未检测到 LICENSE</span></td></tr>
+          <tr><td>DiMo‑GUI</td><td>transformers 4.49；多个模型副本</td><td><span class="tag partial">版本偏旧</span></td><td>只按逻辑重写 crop helper</td><td><span class="tag yes">Apache‑2.0</span></td></tr>
+          <tr><td>UGround / AnchorSeg</td><td>transformers 4.31；mmcv 2.0 cu117/torch2.0；SAM ViT‑H</td><td><span class="tag no">直接冲突</span></td><td>独立 conda/container + HTTP sidecar</td><td><span class="tag yes">Apache‑2.0</span></td></tr>
+          <tr><td>SaFiRe</td><td>transformers 4.35；mmcv‑full 1.7.2；VMamba custom kernel</td><td><span class="tag no">直接冲突</span></td><td>独立环境，仅离线 checkpoint 评测</td><td><span class="tag no">未检测到 LICENSE</span></td></tr>
+          <tr><td>LISAt</td><td>transformers 4.31；RemoteCLIP；FlashAttention；A100 推荐</td><td><span class="tag no">直接冲突</span></td><td>独立服务化，不与 SAM3 env 混装</td><td><span class="tag yes">MIT</span></td></tr>
+        </tbody>
+      </table>
+      <div class="callout amber"><strong>代码复制边界：</strong>RefChess、TGS‑Agent、GroundingME、SaFiRe 的 GitHub API 未检测到明确 LICENSE 元数据。即使研究复现可参考，在把源码片段直接合入项目之前也应人工确认授权；更稳妥的做法是依据论文思想独立实现小型 adapter，并保留来源说明。</div>
+    </section>
+
+    <section class="section" id="design">
+      <h2>6. 推荐工程架构：SAM3 保持不动，重写候选证据与选择协议</h2>
+      <div class="flow">
+        <div class="node new"><strong>目标签名</strong>类别 / 属性 / 锚点 / 排除项</div>
+        <div class="node"><strong>SAM3 proposals</strong>最多生成 12 个</div>
+        <div class="node hot"><strong>候选清洗</strong>NMS / 面积 / 边界 / 质量</div>
+        <div class="node hot"><strong>Top‑4 卡片</strong>crop + mask + 结构化证据</div>
+        <div class="node new"><strong>上下文重排</strong>pairwise + distractor stability</div>
+        <div class="node warn"><strong>验证门</strong>margin / vote / consistency</div>
+        <div class="node"><strong>选 ID 或补看</strong>一次 zoom / rewrite / reject</div>
+      </div>
+
+      <h3>6.1 候选返回协议</h3>
+      <pre>{
+  "candidate_id": "target_03",
+  "bbox_2d": [x1, y1, x2, y2],
+  "area_ratio": 0.012,
+  "backend_score": 0.81,
+  "mask_quality": 0.77,
+  "crop_path": ".../target_03_crop.png",
+  "mask_card_path": ".../target_03_overlay.png",
+  "cross_view_consistency": 0.73,
+  "relation_features": {"left_of_anchor": true, "distance_px": 42}
+}</pre>
+      <p>候选卡片应固定大小、mask 高亮、ID 放在卡片边缘而不是覆盖目标。全图只用于理解 global context；实例 identity 的精细判断使用局部卡片。生成 12 个候选不等于一次给 Agent 看 12 个：先确定性清洗，再分批展示 top‑4；低置信度才加载第二批。</p>
+
+      <h3>6.2 轻量综合分数</h3>
+      <div class="formula">S(i) = 0.30·semantic + 0.20·attribute + 0.15·relation + 0.10·mask_quality + 0.15·distractor_stability + 0.10·cross_view_consistency</div>
+      <p class="small muted">权重是首轮实验起点，不是论文复述。semantic/attribute 可由现有 Qwen 的结构化判断或 FG‑CLIP 提供；relation 仅当语言确实包含空间约束时启用；DINOv3 matcher 用于视觉一致性，不应被当作文本—图像语义模型。</p>
+
+      <h3>6.3 RefChess‑Lite 伪代码</h3>
+      <pre>signature = think_target(dialogue_event)
+proposals = sam3(image, signature.category_and_synonyms)
+pool = deterministic_prefilter_and_nms(proposals, keep=8)
+shortlist = cheap_score(pool, signature)[:4]
+
+for candidate in shortlist:
+    base = score_crop(candidate, signature)
+    stability = mean([
+        pairwise_rank(candidate, sampled_distractors, signature)
+        for sampled_distractors in sample_contexts(shortlist, n=3)
+    ])
+    candidate.final = base + lambda_ctx * stability
+
+winner, runner_up = top2(shortlist)
+if low_absolute_score(winner) or low_margin(winner, runner_up) or inconsistent_votes():
+    winner = zoom_and_compare_once(winner, runner_up)
+if still_uncertain(winner):
+    return REQUERY_OR_ABSTAIN
+return winner.candidate_id</pre>
+
+      <h3>6.4 需要避免的三个误区</h3>
+      <ul>
+        <li><strong>把 SAM score 当语义正确率：</strong>它更多反映 proposal/mask 质量，不证明 mask 是指令中的目标。</li>
+        <li><strong>把 self‑reported confidence 当校准分数：</strong>应以 top‑2 margin、跨 prompt 一致性与外部视觉证据为主。</li>
+        <li><strong>无限增加候选或推理轮数：</strong>更多候选会增加视觉绑定错误；test‑time scaling 必须由不确定性触发并设硬预算。</li>
+      </ul>
+    </section>
+
+    <section class="section" id="experiments">
+      <h2>7. 可在一周内完成的实验矩阵</h2>
+      <table>
+        <thead><tr><th>阶段</th><th>改动</th><th>训练</th><th>预计工作量</th><th>目的 / 论文归因</th></tr></thead>
+        <tbody>
+          <tr><td><strong>B0</strong></td><td>现有 contact sheet + Qwen 直接选 ID</td><td>无</td><td>已有</td><td>原始基线</td></tr>
+          <tr><td><strong>B1 Evidence</strong></td><td>恢复 score/bbox/quality；候选 crop card；IoU‑NMS；top‑4 分批</td><td>无</td><td>1–2 天</td><td>验证接口与视觉拥挤是否是主要原因</td></tr>
+          <tr><td><strong>B2 Think</strong></td><td>TGS‑Lite 对话 → object signature；类别与描述分离</td><td>无</td><td>0.5–1 天</td><td>验证 query information loss</td></tr>
+          <tr><td><strong>B3 Context</strong></td><td>RefChess‑Lite 两两比较 + 3 个 distractor subsets 稳定性</td><td>无</td><td>2–4 天</td><td>核心创新候选：解决同类实例误选</td></tr>
+          <tr><td><strong>B4 Verify</strong></td><td>R‑Ground‑Lite 三路加权投票；margin / DINO consistency verifier</td><td>无</td><td>1–2 天</td><td>降低单次推理偶然性</td></tr>
+          <tr><td><strong>B5 Recover</strong></td><td>DiMo‑Lite：低置信度时只对 top‑2 zoom 二选一；仍低则拒答/重写</td><td>无</td><td>1–2 天</td><td>解决 tiny / crowded / rejection</td></tr>
+          <tr><td><strong>B6 Sidecar</strong></td><td>UGround / AnchorSeg / LISAt checkpoint 直接文本到 mask</td><td>先仅推理</td><td>3–10 天+</td><td>判断 proposal‑selection 范式的上限，不作为首轮主线</td></tr>
+        </tbody>
+      </table>
+      <div class="callout amber"><strong>最小可发表组合：</strong>B1 + B2 + B3 + B5。它覆盖表示、干扰项重排与主动恢复，且所有主干冻结。B4 可作为“多路径验证”增强项；如果 B1 单独就大幅提升，论文应诚实地把贡献聚焦为 grounding evidence protocol，而不是声称新模型能力。</div>
+
+      <h3>消融建议</h3>
+      <div class="grid grid-3">
+        <div class="mini"><h4>候选数量</h4><p>K = 2 / 4 / 8 / 12；同时报告 proposal recall 与 selection accuracy，避免仅看最终成功率。</p></div>
+        <div class="mini"><h4>视觉呈现</h4><p>contact sheet vs 单候选 crop vs top‑2 pair card；控制总像素预算。</p></div>
+        <div class="mini"><h4>上下文机制</h4><p>independent score vs pairwise vs sampled distractor stability vs full MCTS。</p></div>
+        <div class="mini"><h4>验证信号</h4><p>SAM quality / VLM semantic / relation / DINO consistency 单项与组合。</p></div>
+        <div class="mini"><h4>补看策略</h4><p>never / always / margin‑triggered；报告额外 VLM 调用数和 latency。</p></div>
+        <div class="mini"><h4>拒答能力</h4><p>存在目标与 absent target 混合；统计 false selection 和 recovery success。</p></div>
+      </div>
+    </section>
+
+    <section class="section" id="metrics">
+      <h2>8. 评测协议：必须把 proposal、selection、navigation 三层拆开</h2>
+      <table>
+        <thead><tr><th>层级</th><th>指标</th><th>回答的问题</th></tr></thead>
+        <tbody>
+          <tr><td>Proposal</td><td>Recall@K，Oracle mask IoU / bbox IoU</td><td>SAM3 是否把真目标放进候选集合？</td></tr>
+          <tr><td>Selection</td><td>Accuracy | Recall，top‑1/top‑2 margin，MRR</td><td>真目标存在时，Agent 能否选对？</td></tr>
+          <tr><td>Rejection</td><td>Absent accuracy、false‑selection rate、AUROC / AUPRC</td><td>没有可靠目标时能否不乱选？</td></tr>
+          <tr><td>Calibration</td><td>ECE / reliability diagram</td><td>confidence 是否能用来触发补看？</td></tr>
+          <tr><td>Efficiency</td><td>VLM calls、SAM calls、token、GPU memory、latency</td><td>精度提升是否值得 test‑time 成本？</td></tr>
+          <tr><td>Downstream</td><td>AVDN SR / SPL / GP，事件完成率</td><td>候选选择提升是否转化为真实导航收益？</td></tr>
+        </tbody>
+      </table>
+
+      <h3>本地难例四分法</h3>
+      <ul>
+        <li><strong>Discriminative：</strong>同类、颜色/形状相近，真目标在 candidates 内但常选错。</li>
+        <li><strong>Spatial：</strong>需借 anchor、左右/前后/邻近关系才能消歧。</li>
+        <li><strong>Limited：</strong>小目标、遮挡、边界截断、低对比度、多尺度不一致。</li>
+        <li><strong>Rejection：</strong>目标不可见、SAM3 漏召回、对话描述与画面冲突。</li>
+      </ul>
+      <p>建议从现有日志抽取至少 100–300 个失败事件，人工只标注“真候选 ID / absent / failure type”，无需先做完整像素 mask。若已有 GT mask，则可自动确定 oracle candidate。</p>
+    </section>
+
+    <section class="section" id="sources">
+      <h2>9. 官方来源与源码核查记录</h2>
+      <p>论文结论优先使用官方会议论文页、OpenReview、ACL Anthology 或 NeurIPS Proceedings；源码状态使用作者公开仓库。以下为最关键的一手链接。</p>
+      <div class="two">
+        <div>
+          <h3>核心论文</h3>
+          <ul>
+            <li><a href="https://openreview.net/forum?id=RESRoG7nvd">RefChess — ICML 2026 / OpenReview</a> · <a href="https://github.com/Tongshiyan/RefChess">官方代码</a></li>
+            <li><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Zhang_Breaking_the_Regional_Perception_Bottleneck_of_Multimodal_Large_Language_Models_CVPR_2026_paper.html">R‑Ground — CVPR 2026</a></li>
+            <li><a href="https://proceedings.iclr.cc/paper_files/paper/2026/hash/7f52f6b8f107931127eefe15429ee278-Abstract-Conference.html">PostAlign — ICLR 2026</a></li>
+            <li><a href="https://ojs.aaai.org/index.php/AAAI/article/view/38373">TGS‑Agent — AAAI 2026</a> · <a href="https://github.com/jasongief/TGS-Agent">官方代码</a></li>
+            <li><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Li_GroundingME_Exposing_the_Visual_Grounding_Gap_in_MLLMs_through_Multi-Dimensional_CVPR_2026_paper.html">GroundingME — CVPR 2026</a> · <a href="https://github.com/lirang04/GroundingME">评测代码</a></li>
+            <li><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/0a8d149749e6d4d28fb8c8c2f70fd05a-Abstract-Conference.html">SaFiRe — NeurIPS 2025</a> · <a href="https://github.com/zhenjiemao/SaFiRe">官方代码</a></li>
+            <li><a href="https://aclanthology.org/2026.acl-long.938/">AnchorSeg — ACL 2026</a> · <a href="https://github.com/rui-qian/AnchorSeg">官方代码</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3>工程与领域补充</h3>
+          <ul>
+            <li><a href="https://aclanthology.org/2025.emnlp-main.1334/">DiMo‑GUI — EMNLP 2025</a> · <a href="https://github.com/vivo/DiMo-GUI">官方代码</a></li>
+            <li><a href="https://openaccess.thecvf.com/content/ICCV2025/html/Luo_Visual_Test-time_Scaling_for_GUI_Agent_Grounding_ICCV_2025_paper.html">RegionFocus — ICCV 2025</a> · <a href="https://github.com/tiangeluo/RegionFocus">官方代码</a></li>
+            <li><a href="https://ojs.aaai.org/index.php/AAAI/article/view/38181">RIS‑LAD — AAAI 2026</a> · <a href="https://github.com/AHideoKuzeA/RIS-LAD">项目仓库</a></li>
+            <li><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/a38a009bb015775b7685b5ef3c206310-Abstract-Datasets_and_Benchmarks_Track.html">LISAt — NeurIPS 2025</a> · <a href="https://github.com/lisat-bair/LISAt_code">官方代码</a></li>
+            <li><a href="https://openaccess.thecvf.com/content/CVPR2025/html/Wei_HyperSeg_Hybrid_Segmentation_Assistant_with_Fine-grained_Visual_Perceiver_CVPR_2025_paper.html">HyperSeg — CVPR 2025</a> · <a href="https://github.com/congvvc/HyperSeg">官方代码</a></li>
+            <li><a href="https://openaccess.thecvf.com/content/CVPR2025/html/Wu_F-LMM_Grounding_Frozen_Large_Multimodal_Models_CVPR_2025_paper.html">F‑LMM — CVPR 2025</a> · <a href="https://github.com/wusize/F-LMM">官方代码</a></li>
+          </ul>
+        </div>
+      </div>
+      <details><summary>检索边界与判断口径</summary><div><p>“最新”以 2026‑08‑23 可公开访问的正式会议页面为准。重点覆盖 AAAI 2026、ICML 2026、ICLR 2026、CVPR 2026、ACL 2026，以及 NeurIPS 2025；加入 EMNLP 2025 与 ICCV 2025，是因为其训练自由的 zoom / region‑focus 方法与候选选择工程问题非常接近。未把仅投稿、撤稿或 workshop preprint 作为核心结论依据。</p><p>“可快速上手”不是只看是否有 GitHub，而是同时检查是否有单图 demo/评测入口、checkpoint、依赖规模与是否需要训练。RefChess 虽有完整代码，但全量 MCTS 与依赖偏重，因此报告推荐裁剪版；RIS‑LAD 虽领域最贴近，但仓库仍标记模型代码 coming soon，因此不能列为快速复现首选。</p></div></details>
+    </section>
+  </main>
+
+  <footer class="footer">生成日期：2026‑08‑23 · 工作区：E:\Levir\2DNav\2DNav-project · 本报告是工程决策快照；模型、仓库和会议页面后续可能更新。</footer>
+</body>
+</html>

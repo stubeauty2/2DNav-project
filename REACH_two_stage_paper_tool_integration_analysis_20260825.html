@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>REACH 两阶段：论文工具化接入与当前实现分析</title>
+  <style>
+    :root {
+      --bg: #f3f6f8;
+      --paper: #ffffff;
+      --ink: #182431;
+      --muted: #617082;
+      --line: #d9e1e8;
+      --navy: #173a57;
+      --blue: #236aa0;
+      --teal: #0b7773;
+      --green: #28734f;
+      --amber: #a0640b;
+      --red: #a64040;
+      --violet: #6752a3;
+      --soft-blue: #eaf3fa;
+      --soft-green: #eaf5ef;
+      --soft-amber: #fff5e2;
+      --soft-red: #faecec;
+      --soft-violet: #f1edfa;
+      --shadow: 0 12px 34px rgba(26, 53, 78, .08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.68 Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: "Cascadia Code", Consolas, monospace; }
+    code { padding: .08em .34em; border-radius: 4px; background: #edf2f6; font-size: .92em; }
+    pre { overflow: auto; margin: 14px 0 0; padding: 16px 18px; border-radius: 10px; background: #13283a; color: #e8f0f6; line-height: 1.55; font-size: 12.8px; }
+    .hero { color: #fff; background: linear-gradient(125deg, #102d46 0%, #1e5373 58%, #0d736d 100%); }
+    .hero-inner, main, .footer-inner { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    .hero-inner { padding: 56px 0 48px; }
+    .eyebrow { margin-bottom: 10px; color: #b9d9e6; letter-spacing: .12em; text-transform: uppercase; font-size: 12px; font-weight: 700; }
+    h1 { max-width: 980px; margin: 0; font-size: clamp(30px, 5vw, 50px); line-height: 1.18; letter-spacing: -.025em; }
+    .hero p { max-width: 920px; margin: 18px 0 0; color: #d8e8ef; font-size: 17px; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 22px; }
+    .hero-meta span, .tag { display: inline-block; padding: 4px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+    .hero-meta span { color: #e8f5f7; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); }
+    .toc { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.94); backdrop-filter: blur(10px); }
+    .toc-inner { display: flex; width: min(1180px, calc(100% - 32px)); margin: 0 auto; gap: 4px; overflow-x: auto; }
+    .toc a { flex: 0 0 auto; padding: 12px 10px; color: var(--muted); font-size: 13px; }
+    main { padding: 28px 0 50px; }
+    section { margin-bottom: 24px; padding: 27px 29px; border: 1px solid var(--line); border-radius: 15px; background: var(--paper); box-shadow: var(--shadow); }
+    h2 { margin: 0 0 15px; color: var(--navy); font-size: 25px; line-height: 1.25; }
+    h3 { margin: 22px 0 9px; color: var(--navy); font-size: 18px; }
+    h4 { margin: 0 0 6px; color: var(--navy); font-size: 15px; }
+    p { margin: 8px 0; }
+    ul, ol { margin: 10px 0; padding-left: 23px; }
+    li + li { margin-top: 5px; }
+    .lead { color: #394b5c; font-size: 16px; }
+    .muted { color: var(--muted); }
+    .small { font-size: 13px; }
+    .grid { display: grid; gap: 14px; }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stat, .mini { min-width: 0; padding: 16px 17px; border: 1px solid var(--line); border-radius: 11px; background: #fbfcfd; }
+    .stat .label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+    .stat .value { margin: 3px 0; color: var(--navy); font-size: 27px; line-height: 1.2; font-weight: 800; }
+    .callout { margin: 15px 0 0; padding: 14px 16px; border-left: 4px solid var(--blue); border-radius: 7px; background: var(--soft-blue); }
+    .callout.green { border-color: var(--green); background: var(--soft-green); }
+    .callout.amber { border-color: var(--amber); background: var(--soft-amber); }
+    .callout.red { border-color: var(--red); background: var(--soft-red); }
+    .table-wrap { overflow-x: auto; margin-top: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: #405468; background: #f5f8fa; font-size: 12px; letter-spacing: .025em; }
+    tbody tr:hover { background: #fafcfd; }
+    .tag.p0 { color: #195e3f; background: #dff1e7; }
+    .tag.p1 { color: #8a5608; background: #fff0d5; }
+    .tag.p2 { color: #5b468e; background: #ebe5f7; }
+    .tag.gap { color: #913b3b; background: #f8dddd; }
+    .tag.done { color: #1e5c76; background: #dfeff5; }
+    .architecture { display: grid; grid-template-columns: 1fr 46px 1fr 46px 1fr; align-items: stretch; gap: 8px; margin-top: 17px; }
+    .lane { padding: 17px; border: 1px solid var(--line); border-top: 5px solid var(--blue); border-radius: 11px; background: #fbfcfd; }
+    .lane.select { border-top-color: var(--violet); }
+    .lane.motion { border-top-color: var(--teal); }
+    .lane.verify { border-top-color: var(--green); }
+    .arrow { display: grid; place-items: center; color: var(--muted); font-size: 25px; font-weight: 800; }
+    .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 13px 0; }
+    .node { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; font-size: 13px; }
+    .flow .arr { color: var(--muted); font-weight: 800; }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .phase { position: relative; padding: 17px 18px 17px 56px; border-top: 1px solid var(--line); }
+    .phase:first-child { border-top: 0; }
+    .phase-num { position: absolute; left: 8px; top: 16px; display: grid; width: 33px; height: 33px; place-items: center; border-radius: 50%; color: #fff; background: var(--navy); font-weight: 800; }
+    .decision { font-weight: 700; color: var(--navy); }
+    .check { color: var(--green); font-weight: 700; }
+    .warn { color: var(--amber); font-weight: 700; }
+    .bad { color: var(--red); font-weight: 700; }
+    footer { padding: 28px 0 40px; color: var(--muted); }
+    @media (max-width: 900px) {
+      .grid-4, .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .architecture { grid-template-columns: 1fr; }
+      .architecture .arrow { transform: rotate(90deg); }
+      .split { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 580px) {
+      .hero-inner { padding: 38px 0 34px; }
+      section { padding: 21px 18px; border-radius: 11px; }
+      .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+      th, td { min-width: 145px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="eyebrow">Implementation analysis · REACH · AVDN</div>
+      <h1>REACH 两阶段：把论文成果作为工具接入当前设计</h1>
+      <p>基于两条专项调研会话、论文源码审计、当前两阶段代码和已有运行产物，回答一个具体问题：目标选择与航点移动已经在接口上解耦，下一步怎样把 RefChess / DiMo‑GUI / SPF / AO‑Planner / ViNT 等方法变成可替换工具，并真正得到 AVDN 风格的密集闭环轨迹。</p>
+      <div class="hero-meta"><span>分析日期：2026‑08‑25</span><span>对象：PSC‑AVDN / ANDH‑Full</span><span>结论：接口已拆，行为尚未闭环</span><span>首轮：无需训练</span></div>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="报告目录"><div class="toc-inner">
+    <a href="#verdict">结论</a><a href="#evidence">现有证据</a><a href="#gap">代码差距</a><a href="#mapping">论文映射</a><a href="#design">目标架构</a><a href="#selection">选择阶段</a><a href="#motion">航点阶段</a><a href="#contracts">契约</a><a href="#experiments">实验</a><a href="#roadmap">路线图</a><a href="#sources">来源</a>
+  </div></nav>
+
+  <main>
+    <section id="verdict">
+      <h2>1. 结论先行</h2>
+      <div class="grid grid-4">
+        <div class="stat"><div class="label">已经完成</div><div class="value">API 解耦</div><div class="muted">selection / motion 可独立运行、落盘、回放。</div></div>
+        <div class="stat"><div class="label">尚未完成</div><div class="value">行为解耦</div><div class="muted">motion 仍输出一个像素点并一次写入事件终点。</div></div>
+        <div class="stat"><div class="label">P0 工具组合</div><div class="value">Rerank + Crop</div><div class="muted">RefChess‑Lite + DiMo crop + rejection gate。</div></div>
+        <div class="stat"><div class="label">P1 控制组合</div><div class="value">短步闭环</div><div class="muted">SPF 调度 + AO‑Planner 可通行性 + 显式几何。</div></div>
+      </div>
+      <div class="callout green"><strong>推荐方案：</strong>保留当前 <code>TargetSelectionResult</code> 作为稳定语义目标边界；在其前面插入“结构化候选重排工具”，在其后面把单点 <code>ReachMotionResult</code> 升级为“局部航点序列 + 只执行短前缀 + 新视图重规划 + 独立到达验证”。论文仓库不整包并入旧环境，而以 sidecar / adapter 形式成为可替换工具。</div>
+      <div class="callout amber"><strong>关键边界：</strong>“固定目标”固定的是目标身份 <code>semantic_target_id</code>，不是第一帧的 bbox、mask 或经纬度。每次移动后仍要在新视图中重新关联同一目标实例；否则闭环只是在重复使用过期像素坐标。</div>
+    </section>
+
+    <section id="evidence">
+      <h2>2. 当前已有运行结果说明了什么</h2>
+      <div class="grid grid-4">
+        <div class="stat"><div class="label">sample3 已有路线</div><div class="value">2 / 2 失败</div><div class="muted"><code>579__1</code>、<code>2552__9</code> 均为 success=false，final IoU=0。</div></div>
+        <div class="stat"><div class="label">sample2 现存批次</div><div class="value">20 / 20 失败</div><div class="muted">现有 prediction 产物内部 success 均为 false；不能当作新两阶段实现的正式评测。</div></div>
+        <div class="stat"><div class="label">579__1 单次位移</div><div class="value">146.9 m</div><div class="muted">sample3 的 e2 从起点一次写到过路后的事件位置。</div></div>
+        <div class="stat"><div class="label">阶段快照实跑</div><div class="value">0 份</div><div class="muted">当前 <code>out/</code> 未发现真实 <code>selection.json</code> / <code>motion.json</code>。</div></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>证据</th><th>观察</th><th>对设计的含义</th></tr></thead>
+        <tbody>
+          <tr><td><code>579__1</code> sample3</td><td>当前距离 GT 中心 94.9 m，旧基线式产物为 149.8 m；两者 final IoU 均为 0。e4 查询 house 时 SAM3 返回 0 候选，路线终止。</td><td>事件解析和方向修复有局部收益，但目标召回硬门控仍能让整条路线失败；必须单独报告 Proposal Recall。</td></tr>
+          <tr><td>预测轨迹 vs GT</td><td><code>579__1</code> sample3 只有 4 个位置状态，其中 TURN 不移动；GT 记录 15 个视野足迹。sample2 的移动段约为 4.3 m、34.6 m、106.2 m，步长变化来自事件落点，不是闭环控制。</td><td>当前轨迹点数与事件数绑定，而非与运动误差/剩余距离绑定；尚未得到理想的密集航点。</td></tr>
+          <tr><td>两阶段测试</td><td>本次复核 <code>test_reach_stages.py</code> 为 3/3 通过；测试使用固定候选和固定导航点的 mock engine。</td><td>证明接口边界成立，不证明真实选择更准或真实移动更合理。</td></tr>
+          <tr><td>视觉测试环境</td><td>历史会话记录为 46 项视觉 unittest 通过；本次默认 Python 缺 <code>cv2</code>，sam3 环境又缺 <code>shapely</code>，无法在单一环境重跑整组。</td><td>论文工具应继续隔离成 sidecar；同时需要一个可重复的集成测试环境，避免“单元测试通过但端到端不可复现”。</td></tr>
+        </tbody>
+      </table></div>
+      <p class="small muted">注意：sample2 / sample3 是当前磁盘上的诊断产物，不是同一冻结配置下的正式统计实验；报告只用它们定位机制问题，不宣称总体性能。</p>
+    </section>
+
+    <section id="gap">
+      <h2>3. 当前代码：接口已经拆开，运动语义仍是“一次跳转”</h2>
+      <div class="architecture">
+        <div class="lane select"><h3>Selection（已独立）</h3><p><code>search_target()</code> 渲染一次 scale‑5 视图，SAM3 生成候选，Qwen 固定一个 candidate，写入 <code>selection.json</code>。</p><p class="check">优点：可独立回放；motion-only 不触发 SAM3。</p></div>
+        <div class="arrow">→</div>
+        <div class="lane motion"><h3>Motion（形式独立）</h3><p><code>run_motion()</code> 从旧视图和固定 candidate 生成一个 <code>target_point_2d</code>；<code>plan_reach_motion()</code> 把它转换成一个经纬度。</p><p class="bad">缺口：没有 waypoint list、迭代、重新观测、progress 或 stop 证据。</p></div>
+        <div class="arrow">→</div>
+        <div class="lane verify"><h3>Event apply（直接完成）</h3><p><code>apply_reach_motion()</code> 对 pass/cross 再加固定 30 m；执行器把 <code>event_position_latlng</code> 写入轨迹并标记事件完成。</p><p class="bad">缺口：planned 被当成 reached，缺少 VERIFY。</p></div>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>文件 / 位置</th><th>当前实现</th><th>需要改变</th></tr></thead>
+        <tbody>
+          <tr><td><code>reach_contracts.py:37</code></td><td><code>TargetSelectionResult</code> 已包含固定候选、全候选、置信度、trace 和 artifacts。</td><td>补 <code>target_signature</code>、结构化 score breakdown、top‑2 margin、rejection reasons、跨帧 reference embedding。</td></tr>
+          <tr><td><code>reach_contracts.py:131</code></td><td><code>ReachMotionResult</code> 只有单个像素点、目标经纬度、事件经纬度。</td><td>改为 <code>waypoints[]</code>、<code>executed_prefix</code>、<code>iterations[]</code>、<code>stop_evidence</code>。</td></tr>
+          <tr><td><code>grounding_agent.py:991</code></td><td><code>run_selection()</code> 是独立选择入口。</td><td>保留入口，在内部增加可替换的 reranker / crop / rejection 工具，不改变事件执行器。</td></tr>
+          <tr><td><code>grounding_agent.py:996</code></td><td><code>run_motion()</code> 明确不访问 VisionToolClient，只使用第一帧 main view 和 candidate。</td><td>把“无 SAM3”保留为单次 planner 的纯模式；闭环 controller 负责下一帧 re-association，可由 matcher 或独立 sidecar 完成。</td></tr>
+          <tr><td><code>search_engine.py:427</code></td><td><code>plan_reach_motion()</code> 只规划一次，并立即完成像素→经纬度变换。</td><td>拆为 <code>propose_local_trajectory()</code> 与 <code>execute_reach_loop()</code>；前者可离线评测，后者负责滚动执行。</td></tr>
+          <tr><td><code>Search_Confirmation.py:793</code></td><td>读取 <code>event_position_latlng</code> 后更新位置；随后在 816 行附近完成事件。</td><td>只有 verifier 返回 <code>reached</code> 才完成事件；<code>approaching</code> 继续产生 motion iteration。</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="mapping">
+      <h2>4. 他人成果如何变成当前项目的“工具”</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>方法 / 源码</th><th>可抽取工具</th><th>放入当前链路的位置</th><th>接入判断</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://openreview.net/forum?id=RESRoG7nvd">RefChess, ICML 2026</a> · <a href="https://github.com/Tongshiyan/RefChess">code</a></td><td>语言约束解析、多证据 proposal scorer、干扰项对比框架。</td><td>SAM3 proposal 之后、<code>finish_target_selection</code> 之前。</td><td><span class="tag p0">P0</span> 抽 parser/scorer；不原样照搬公开 MCTS，因为源码中的主候选语义分预计算，rollout 又含随机支持候选，未形成真正上下文重算。</td></tr>
+          <tr><td><a href="https://aclanthology.org/2025.emnlp-main.1334/">DiMo‑GUI, EMNLP 2025</a> · <a href="https://github.com/vivo/DiMo-GUI">code</a></td><td><code>RegionTraverser</code> 式局部裁剪、坐标映射、动态放大。</td><td>top‑1/top‑2 margin 低时，只给二者等分辨率 crop 做二选一。</td><td><span class="tag p0">P0</span> 可重写约 150 行核心逻辑；不整仓迁移，原 Qwen 路径存在轮数硬编码和配置未接线。</td></tr>
+          <tr><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/38373">TGS‑Agent, AAAI 2026</a> · <a href="https://github.com/jasongief/TGS-Agent">code</a></td><td>Think → Ground → Segment 中的 object signature。</td><td>把长事件描述压成类别、颜色、形状、材质、锚点、排除项，再调用 SAM3。</td><td><span class="tag p0">P0‑Lite</span> 只借结构化签名，不引入完整音视频模型。</td></tr>
+          <tr><td><a href="https://proceedings.iclr.cc/paper_files/paper/2026/hash/7f52f6b8f107931127eefe15429ee278-Abstract-Conference.html">PostAlign, ICLR 2026</a> + <a href="https://openaccess.thecvf.com/content/CVPR2026/html/Li_GroundingME_Exposing_the_Visual_Grounding_Gap_in_MLLMs_through_Multi-Dimensional_CVPR_2026_paper.html">GroundingME, CVPR 2026</a></td><td>负样本拒绝、歧义分类、显式 absent / uncertain。</td><td>作为 selection gate；候选证据不足时禁止强制选 ID。</td><td><span class="tag p0">P0‑Eval</span> 机制可本地实现；GroundingME 原解析会混淆格式错误和拒答，评测器需重写。</td></tr>
+          <tr><td><a href="https://proceedings.mlr.press/v305/hu25e.html">See, Point, Fly, CoRL 2025</a> · <a href="https://github.com/Hu-chih-yao/see-point-fly">code</a></td><td>2D waypoint + traveling distance + adaptive closed-loop control。</td><td>替换当前“一点→终点”的 motion 调度器。</td><td><span class="tag p0">P0/P1</span> 与问题最同构；复用循环与步长思想，UAV 控制接口改成 view-corners / lat‑lng。</td></tr>
+          <tr><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/34526">AO‑Planner, AAAI 2025</a> · <a href="https://github.com/chen-judge/AO-Planner">code</a></td><td>SAM affordance、可通行候选 waypoint、局部低层路径。</td><td>在语义目标与局部 waypoint 之间加入 traversability tool。</td><td><span class="tag p1">P1</span> 先抽数据结构和 mask→candidate path；不引入完整 Habitat 双环境。</td></tr>
+          <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2022/html/Hong_Bridging_the_Gap_Between_Learning_in_Discrete_and_Continuous_Environments_for_Vision-and-Language_Navigation_CVPR_2022_paper.html">CWP, CVPR 2022</a></td><td>方向 × 距离离散 heatmap。</td><td>作为无需扩散模型的第一版局部航点预测头，或用于规则候选打分。</td><td><span class="tag p1">P1</span> 比直接迁移 NoMaD/Diffusion 轻；容易做 GT 监督和消融。</td></tr>
+          <tr><td><a href="https://general-navigation-models.github.io/vint/">ViNT</a> / <a href="https://general-navigation-models.github.io/nomad/">NoMaD</a> / <a href="https://arxiv.org/abs/2303.04137">Diffusion Policy</a></td><td>temporal distance、短动作序列、receding-horizon 前缀执行。</td><td>先只借输出契约和 H/K 调度；P2 再替换轨迹生成器。</td><td><span class="tag p2">P2</span> 当前不适合整套训练栈迁移；先证明规则/Transformer 航点闭环有效。</td></tr>
+          <tr><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/39562">IndoorUAV, AAAI 2026</a> + <a href="https://openaccess.thecvf.com/content/CVPR2026/html/Fan_HTNav_A_Hybrid_Navigation_Framework_with_Tiered_Structure_for_Urban_CVPR_2026_paper.html">HTNav, CVPR 2026</a></td><td>短子轨迹、终态观测续接、progress/value/goal 与 overshoot 评测。</td><td>定义 controller / verifier 边界与评测协议。</td><td><span class="tag p1">结构参考</span> 不必先移植模型，先把 progress、stop、overshoot 变成一等输出。</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout"><strong>“工具化”原则：</strong>每个外部方法只提供一个窄接口，例如 <code>rerank(candidates, signature)</code>、<code>crop(candidate)</code>、<code>traversability(view)</code>、<code>propose_trajectory(state)</code> 或 <code>verify(state)</code>。工具不可直接改写事件状态；只有当前 REACH controller 能提交 selection、执行 waypoint 和完成事件。</div>
+    </section>
+
+    <section id="design">
+      <h2>5. 推荐目标架构：稳定身份、滚动航点、独立验证</h2>
+      <div class="flow" aria-label="推荐 REACH 流程">
+        <div class="node"><strong>PARSE</strong><br>事件 + object signature</div><div class="arr">→</div>
+        <div class="node"><strong>SELECT ONCE</strong><br>SAM3 + rerank + reject</div><div class="arr">→</div>
+        <div class="node"><strong>TRACK</strong><br>同一目标跨帧关联</div><div class="arr">→</div>
+        <div class="node"><strong>PLAN H</strong><br>短局部航点序列</div><div class="arr">→</div>
+        <div class="node"><strong>EXECUTE K</strong><br>只走 1–2 个点</div><div class="arr">→</div>
+        <div class="node"><strong>VERIFY</strong><br>继续 / 缩步 / 恢复 / 到达</div><div class="arr">↺</div>
+      </div>
+      <div class="split">
+        <div class="mini"><h4>长期不变：SemanticTarget</h4><ul><li>目标描述和结构化 signature</li><li>首帧 candidate ID、mask、bbox、crop</li><li>视觉 reference embedding / appearance evidence</li><li>relation / side / event identity</li></ul></div>
+        <div class="mini"><h4>每一步更新：ReachBelief</h4><ul><li>当前位姿和新 view corners</li><li>同一目标在新视图中的关联结果</li><li>remaining distance / progress trend</li><li>局部可通行性、waypoint 前缀、停止证据</li></ul></div>
+      </div>
+      <pre>SELECT_ONCE → APPROACH_LOOP → VERIFY
+                    │            ├─ reached  → DONE
+                    │            ├─ progress → 下一轮短步
+                    │            ├─ stalled  → 缩步 / 改局部路径
+                    │            └─ lost     → REASSOCIATE（不是立即换目标）
+                    └───────────────────────────────↺</pre>
+    </section>
+
+    <section id="selection">
+      <h2>6. 第一阶段落地：RefChess‑Lite 不是一个新大模型，而是一套候选证据协议</h2>
+      <div class="phase"><span class="phase-num">1</span><h4>Object signature</h4><p>在 SAM3 前，把事件目标解析成 <code>{category, attributes, material, shape, anchors, spatial_relation, excludes}</code>。这一步借 TGS‑Agent / RefChess 的语言拆解，并固化到 selection snapshot，避免模型在不同工具调用中改变目标含义。</p></div>
+      <div class="phase"><span class="phase-num">2</span><h4>Candidate evidence pack</h4><p>保留后端本已有、但当前 compact context 丢弃的字段：<code>bbox_2d</code>、<code>area_ratio</code>、SAM score、mask quality、component scores、crop path、forward-sector evidence。DINOv3 仅作为跨视图/跨尺度一致性项，不冒充文本语义编码器。</p></div>
+      <div class="phase"><span class="phase-num">3</span><h4>Top‑K 预过滤与对比重排</h4><p>先用硬约束去掉 role 不符、面积异常、重复 mask；再对 top‑4 生成等视觉预算 crop。对 top‑1/top‑2 做成对比较，问题必须引用 signature 的属性、锚点和排除项，不允许用“最近/最大/SAM 分最高”自动破局。</p></div>
+      <div class="phase"><span class="phase-num">4</span><h4>Rejection gate</h4><p>至少记录绝对分、top‑2 margin、多次投票一致性、跨尺度/跨帧一致性。任意两项失败时返回 <code>uncertain</code>，允许一次 crop / query rewrite；仍不足才 <code>absent</code>。格式错误单列为 <code>failed</code>。</p></div>
+      <div class="callout amber"><strong>不要做：</strong>不要把 RefChess 仓库的 MCTS 整体搬进当前流程；不要继续让一张含 8–12 个缩小 mask 的 contact sheet 承担全部语义选择；不要把模型自报 confidence 当作校准后的置信度。</div>
+    </section>
+
+    <section id="motion">
+      <h2>7. 第二阶段落地：从单点 motion 变成 SPF 式滚动控制</h2>
+      <div class="grid grid-3">
+        <div class="mini"><h4>7.1 Re-associate</h4><p>每轮从新视图中找回同一目标，优先用 selection 中保存的 crop / mask embedding 与新 proposal 匹配。低置信度时进入 lost，不可直接选择另一个相似实例。</p></div>
+        <div class="mini"><h4>7.2 Propose H</h4><p>规划未来 H 个相对航点。P0 可用显式 view geometry + 目标位置；P1 加 AO‑Planner 式可通行 mask / CWP 方向距离候选；P2 才用学习式 trajectory head。</p></div>
+        <div class="mini"><h4>7.3 Execute K</h4><p>只执行 K=1（验证稳定后可 K=2），然后重新渲染。pass/cross 的 30 m 不再一次性追加，而作为越界后的子目标条件。</p></div>
+        <div class="mini"><h4>7.4 Adaptive step</h4><p>建议首轮实验起点：<code>step = clip(0.35 × remaining_distance × confidence, 5 m, 30 m)</code>。这是工程初值，不是论文固定公式；应由消融确定。</p></div>
+        <div class="mini"><h4>7.5 Progress</h4><p>每步记录地理剩余距离、目标像素尺度/位置变化、目标一致性和局部轨迹代价。连续两步无进展则缩步或换局部路径，连续三步才触发恢复。</p></div>
+        <div class="mini"><h4>7.6 Reach verifier</h4><p>目标身份稳定、几何距离进入允许区域、remaining distance 低、局部 planner 不再要求明显前进，并连续保持两帧，才返回 reached。</p></div>
+      </div>
+      <div class="callout green"><strong>对当前几何的直接利用：</strong>项目已有 768×768 main view、view corners 与像素→经纬度变换。因此 P0 不需要学习距离模型：先将目标方向和距离转换为真实米制，再截断成短步；每步移动后重新生成 view corners。这个版本即可验证“闭环是否比一次跳转好”。</div>
+      <div class="callout red"><strong>pass / cross / through 的修正：</strong>当前先落到目标点、再固定前移 30 m。建议改成两段 verifier：先确认进入目标边界，再要求沿 relation 方向越过边界并获得正 clearance；30 m 只是最大上限或起始超参数，不再等价于事件完成。</div>
+    </section>
+
+    <section id="contracts">
+      <h2>8. 建议的数据契约升级</h2>
+      <div class="split">
+        <div><h3>selection/v2</h3><pre>{
+  "semantic_target_id": "route/e2/target",
+  "status": "selected | uncertain | absent | failed",
+  "target_signature": { ... },
+  "selected_candidate": { ... },
+  "score_breakdown": {
+    "semantic": 0.0,
+    "attribute": 0.0,
+    "relation": 0.0,
+    "consistency": 0.0
+  },
+  "top2_margin": 0.0,
+  "rejection_reasons": [],
+  "reference_artifacts": {
+    "crop": "...",
+    "mask": "...",
+    "embedding": "..."
+  }
+}</pre></div>
+        <div><h3>motion/v2</h3><pre>{
+  "status": "approaching | reached | stalled | lost | failed",
+  "semantic_target_id": "route/e2/target",
+  "iterations": [{
+    "pose_before": [0, 0],
+    "target_track": { ... },
+    "waypoints_latlng": [[0, 0], [0, 0]],
+    "executed_prefix": 1,
+    "step_meters": 18.4,
+    "progress_delta": 12.7,
+    "pose_after": [0, 0]
+  }],
+  "stop_evidence": {
+    "identity_stable_frames": 2,
+    "remaining_distance_m": 8.1,
+    "relation_satisfied": true
+  }
+}</pre></div>
+      </div>
+      <p class="small muted">兼容策略：继续读取 <code>reach-stage/v1</code>，但只把它视为一次局部 proposal；新 controller 将 v1 单点包装成长度为 1 的 waypoint list。写出统一使用 v2，避免旧字段继续被误解为最终到达。</p>
+    </section>
+
+    <section id="experiments">
+      <h2>9. 解耦实验：必须能回答“选错”还是“走错”</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>实验</th><th>Selection 输入</th><th>Motion 输入</th><th>回答的问题</th><th>核心指标</th></tr></thead>
+        <tbody>
+          <tr><td><strong>S0</strong></td><td>SAM3 + 当前 Qwen</td><td>不运行</td><td>当前 proposal miss 与 selection error 各占多少？</td><td>Proposal Recall@K；Selection Acc | Recall；Absent F1；ECE / margin。</td></tr>
+          <tr><td><strong>S1</strong></td><td>+ evidence pack</td><td>不运行</td><td>仅恢复结构化证据是否有效？</td><td>同 S0；API 成本与延迟。</td></tr>
+          <tr><td><strong>S2</strong></td><td>+ RefChess‑Lite + crop + reject</td><td>不运行</td><td>对比重排是否解决相似候选？</td><td>hard-negative accuracy；uncertain precision。</td></tr>
+          <tr><td><strong>M0</strong></td><td>GT / 人工 selection snapshot</td><td>当前单点 motion</td><td>目标正确时，现有移动本身有多差？</td><td>endpoint error；overshoot；relation success；trajectory points/event。</td></tr>
+          <tr><td><strong>M1</strong></td><td>同一 GT snapshot</td><td>规则短步闭环</td><td>不训练能否先获得密集、稳定轨迹？</td><td>nDTW / SDTW；progress 单调性；replan 次数；step length 分布。</td></tr>
+          <tr><td><strong>M2</strong></td><td>同一 GT snapshot</td><td>+ traversability / CWP</td><td>局部可通行性是否减少直线穿越和停错边界？</td><td>collision proxy；path efficiency；relation boundary accuracy。</td></tr>
+          <tr><td><strong>E2E</strong></td><td>最佳 selection</td><td>最佳 motion</td><td>两阶段组合后是否真正改善路线？</td><td>官方 SR / SPL / GP；事件完成率；错误归因矩阵。</td></tr>
+        </tbody>
+      </table></div>
+      <div class="grid grid-3" style="margin-top:14px">
+        <div class="mini"><h4>数据切分</h4><p>复用已有 60 条 grounding 标注计划：20 calibration + 40 held‑out，其中至少 15 条 absent。motion 另从 GT 路径提取事件级短子轨迹，禁止用 test 标注调阈值。</p></div>
+        <div class="mini"><h4>错误账本</h4><p>每个失败只归入一个首因：proposal miss、selection wrong、track lost、waypoint unsafe、overshoot、premature stop、verification false negative。</p></div>
+        <div class="mini"><h4>成功门槛</h4><p>P0 selector 只有在 held‑out 的 conditional accuracy 提升且 absent F1 不降时进入主链；P0 motion 只有在 GT selection 下减少 endpoint error / overshoot 时进入 E2E。</p></div>
+      </div>
+    </section>
+
+    <section id="roadmap">
+      <h2>10. 实施路线与文件落点</h2>
+      <div class="phase"><span class="phase-num">A</span><h4>先把新两阶段真的跑起来（0.5–1 天）</h4><p>在冻结的 10 条 route × 1 个 REACH event 上生成真实 <code>selection.json</code> 和 <code>motion.json</code>；修复 split environment 的集成测试启动方式。此步不改模型行为，只建立可重复基线。</p></div>
+      <div class="phase"><span class="phase-num">B</span><h4>Selection P0（2–4 天）</h4><p>在 <code>visual_grounding/</code> 新增 <code>target_signature.py</code>、<code>candidate_reranker.py</code>、<code>candidate_cropper.py</code>、<code>selection_gate.py</code>；扩充 <code>TargetSelectionResult</code>，不修改 motion。先跑 S0–S2。</p></div>
+      <div class="phase"><span class="phase-num">C</span><h4>Motion P0（3–5 天）</h4><p>在 <code>ANDH-Full/</code> 新增 <code>reach_controller.py</code>，实现 render → reassociate → geometric waypoint → execute one → verify 循环；<code>search_engine.py</code> 只提供纯函数式工具。先使用规则步长和显式几何跑 M0–M1。</p></div>
+      <div class="phase"><span class="phase-num">D</span><h4>Traversability P1（3–5 天）</h4><p>把 SAM3 对 road / field / open area 的分割作为 affordance sidecar，参考 AO‑Planner 生成局部可达候选；需要时加入方向×距离 heatmap。跑 M2 和 pass/cross 专项。</p></div>
+      <div class="phase"><span class="phase-num">E</span><h4>学习式轨迹 P2（在规则闭环有效之后）</h4><p>从 GT 密集路径监督 8–16 个相对航点、remaining distance 和 reach head；推理时先保持 K=1。只有多模态路径明显需要时再引入 NoMaD / Diffusion 风格生成器。</p></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>优先级</th><th>要做</th><th>暂缓</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag p0">P0</span></td><td>真实阶段快照、证据不丢失、RefChess‑Lite pairwise rerank、crop、拒答、规则短步闭环、独立 verifier。</td><td>整仓迁移大型 grounding / VLA 模型。</td></tr>
+          <tr><td><span class="tag p1">P1</span></td><td>跨帧目标关联、SAM affordance、CWP 式局部候选、pass/cross 边界验证。</td><td>在无闭环基线前训练扩散策略。</td></tr>
+          <tr><td><span class="tag p2">P2</span></td><td>学习式 waypoint trajectory、remaining-distance / reach heads、多模态 trajectory critic。</td><td>把 world model / foundation navigation model 当作第一版依赖。</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout red"><strong>最可能的错误实施：</strong>只把当前单个 <code>target_point_2d</code> 在直线上插值成 10 个点。这样虽然“航点数量变多”，却没有新观测、重新关联、轨迹修正或停止判断，本质仍是一次跳转，不能获得 GT 所体现的闭环行为。</div>
+    </section>
+
+    <section id="sources">
+      <h2>11. 审计来源与结论边界</h2>
+      <h3>本地代码与运行产物</h3>
+      <ul>
+        <li><a href="PSC-AVDN/script/ANDH-Full/reach_contracts.py">reach_contracts.py</a>、<a href="PSC-AVDN/script/ANDH-Full/grounding_agent.py">grounding_agent.py</a>、<a href="PSC-AVDN/script/ANDH-Full/search_engine.py">search_engine.py</a>、<a href="PSC-AVDN/script/ANDH-Full/Search_Confirmation.py">Search_Confirmation.py</a>。</li>
+        <li><a href="tests/route_psc/test_reach_stages.py">test_reach_stages.py</a>、<a href="tests/route_psc/test_visual_grounding_tools.py">test_visual_grounding_tools.py</a>。</li>
+        <li><a href="out/preds/andh_full_sample3/sequential_search_output/579__1/prediction.json">sample3 / 579__1 prediction</a>、<a href="out/preds/andh_full_sample3/sequential_search_output/2552__9/prediction.json">sample3 / 2552__9 prediction</a>。</li>
+      </ul>
+      <h3>两条会话形成的本地专项报告</h3>
+      <ul>
+        <li><a href="AVDN_SAM3_candidate_selection_research_20260823.html">SAM3 候选选择失败：论文与源码专项调研</a>：对应目标选择部分。</li>
+        <li><a href="REACH_paper_source_feasibility_report_20260825.html">REACH 航点 / 距离：论文源码与当前实现可行性</a>：对应移动部分。</li>
+        <li><a href="PSC_AVDN_baseline_vs_current_report_579_1.html">579__1 基线与当前实现对照</a>：对应已有运行结果。</li>
+      </ul>
+      <p class="small muted">源码级判断来自上述会话对公开仓库入口、关键函数与依赖的审计。2026 论文中部分项目的发布状态可能继续变化；本报告的工程优先级以 2026‑08‑25 已审计到的代码状态为准。建议中的步长、阈值、连续帧数均为待消融的起始值，不作为论文原始结论。</p>
+    </section>
+  </main>
+
+  <footer><div class="footer-inner">REACH two-stage integration analysis · generated for the current 2DNav workspace · 2026‑08‑25</div></footer>
+</body>
+</html>

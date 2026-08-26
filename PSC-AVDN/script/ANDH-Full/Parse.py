@@ -1,9 +1,8 @@
-"""Parse complete ANDH dialogs into a flat ``InstructionPlan``.
+"""Parse each complete ANDH dialog into one chronological trajectory plan.
 
-The language model emits two lists only: entities and ordered events.  This
-module performs tolerant structural normalization and at most one repair for
-malformed output.  It deliberately has no rule-based semantic parser and no
-second-model reviewer.
+QWEN reads all INS and QUE turns together and emits entities plus only four
+execution event types.  This module validates that JSON and permits one repair
+request for an invalid response; it has no rule-based semantic fallback.
 """
 
 from __future__ import annotations
@@ -41,75 +40,159 @@ MODEL_URL = os.getenv(
 MODEL_NAME = os.getenv("PARSER_MODEL_NAME", "qwen3.6-max-preview")
 MODEL_API_TOKEN = os.getenv("QWEN_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
 MODEL_CONNECT_TIMEOUT = float(os.getenv("PARSER_CONNECT_TIMEOUT", "20"))
-MODEL_READ_TIMEOUT = float(os.getenv("PARSER_READ_TIMEOUT", "180"))
+MODEL_READ_TIMEOUT = float(os.getenv("PARSER_READ_TIMEOUT", "300"))
 
-ANNO_DIR = PROJECT_ROOT / "datasets" / "sample2"
-DATASET_DIR = PROJECT_ROOT / "datasets" / "sample2"
+ANNO_DIR = PROJECT_ROOT / "datasets" / "sample3"
+DATASET_DIR = PROJECT_ROOT / "datasets" / "sample3"
 SPLIT = "test_unseen_full"
-PRED_DIR = PROJECT_ROOT / "out" / "preds_out_full_sample2"
+PRED_DIR = PROJECT_ROOT / "out" / "preds_out_full_sample3_no_thinking"
 MAX_DIALOGS = int(os.getenv("PARSER_MAX_DIALOGS", "0"))
 
 TAG_RE = re.compile(r"\[(INS|QUE)\]", re.IGNORECASE)
 
 
 SYSTEM_PROMPT = """
-You parse a complete multi-turn aerial-navigation dialog. Return one JSON
-object with exactly two top-level keys: entities and events. Do not return
-markdown or explanations.
+You are an expert in aerial dialogue navigation. You convert one COMPLETE
+aerial-navigation dialog into one trajectory plan.
+Read every INS and QUE together first, reconstruct the route from start to
+finish, and only then emit JSON. Do not parse turns independently. Later QUE
+and INS text can prove that an earlier local "destination" was only an
+intermediate waypoint, correct an earlier interpretation, or add the visual
+description needed to understand the route.
 
-entities is a list. Each entity has:
-- id: short stable identifier
-- description: one concrete visual description mentioned by an INS turn
-- kind: LANDMARK, REGION, CORRIDOR, or BOUNDARY
-- goal: true only for the final destination
+Return one JSON object with exactly these top-level keys:
+- trajectory_id: copy the supplied trajectory id
+- starting_heading: {"angle": number}, copied from the supplied metadata
+- entities: every visual object or region used by an event
+- events: the complete chronological execution sequence
 
-Every visually verifiable object description is a separate entity, even when
-two descriptions may refer to the same physical object. Bind each entity to
-the navigation event that uses or verifies it. Never merge a later description
-into an earlier entity and never emit UPDATE_ENTITY.
+Each entity has id, description, kind and goal. kind is LANDMARK, REGION,
+CORRIDOR or BOUNDARY. Exactly one entity has goal=true: the final destination
+of the whole dialog. Repeated uses of the same physical object share one id;
+different successive waypoints are different entities.
 
-events is one chronological list extracted from INS turns only. Keep the
-original dialogue turn number, so event turns may be 1, 3, 5, etc. Each event
-has type and turn. Navigation types are MOVE, TURN, REACH, STOP_AT,
-PASS, APPROACH, CROSS, GO_THROUGH, ENTER, EXIT, FOLLOW, AVOID. Dialogue types
-contain only PROGRESS.
+There are exactly four event types:
+- TURN: change travel direction without moving
+- MOVE: move a limited, unspecified distance in the current direction with no
+  visual target
+- REACH: move relative to a visual target. This includes both arriving at the
+  target and passing, flying over, crossing, going through, or travelling along
+  it; encode the exact target-relative motion in relation
+- AVOID: avoid a visual reference
+
+PASS is not an event type. Never emit an event whose type is PASS. Convert
+every pass/fly-over/cross/go-through/travel-along instruction into a REACH
+event bound to that visual target, and preserve the action explicitly in its
+relation field.
+
+Every event has id (e1, e2, ...), turn and type. turn is the INS turn that
+supplies the executable instruction. QUE text helps interpret the complete
+route but never creates an event of its own.
 
 Optional event fields:
-- entity: entity id, or a concrete description when no id was declared
-- direction: {"frame":"absolute|relative", "angle": number}
-- mode: FORWARD or BACKWARD
-- count, side
-- ref and completed for PROGRESS; ref is the 1-based index of an earlier event
+- entity: required for REACH and AVOID; forbidden for TURN and MOVE
+- direction: for TURN, with frame, angle, and optionally clock/description
+- relation: concise relation to the event entity. For former pass-style
+  actions, begin with the explicit motion phrase: "pass", "fly over", "cross",
+  "go through", or "travel along". Do not weaken these to only "over" or
+  "along". For ordinary arrival, retain relations such as "reach the north
+  side", "behind", or "on the right side"
+- distance: use "limited_unspecified" for an explicit untargeted MOVE
+- spatial_constraints: list of concrete geographic relations needed to locate
+  the target
+- count and side when explicitly stated
 
-QUE turns are context only for understanding the following INS answer. Never
-emit an event from a QUE turn, never output QUERY, and never extract entities,
-progress claims, observations, or movements solely from QUE text.
+Direction rules:
+- Express every direction change as a separate TURN before the motion it
+  controls, even when the text says "move/head/go toward 6 o'clock".
+- Do not attach a direction directly to MOVE, REACH or AVOID. They use
+  the current direction established by the preceding TURN.
+- A direction stays active until another TURN.
+- Angles are clockwise degrees. Absolute: north=0, east=90, south=180,
+  west=270. Relative: forward/12=0, 3=90, 6=180, 9=270, 1=30, 7=210,
+  8:30=255.
+- Preserve multiple direction operations in one instruction. For example,
+  "move toward 6 o'clock and turn 3 o'clock" must not lose the 6 o'clock leg.
 
-Angles are clockwise degrees. Absolute 0 is north, 90 east, 180 south and 270
-west. Relative 0 is forward; clock bearings are relative (12=0, 3=90, 6=180,
-7=210, 9=270). Preserve the stated event order. A direction remains active
-until a later event changes it, so it need not be repeated. Use PROGRESS only
-when an INS turn explicitly states that an earlier event has already happened;
-visibility or proximity alone is completed=false. Any PASS, CROSS, REACH,
-APPROACH, STOP_AT, GO_THROUGH, ENTER, EXIT, FOLLOW, or AVOID involving an
-object must carry that object's entity id. If an INS says to move toward a
-described object or destination without explicitly saying it is reached, emit
-APPROACH bound to that entity, not a bare MOVE. Use bare MOVE only when no
-object needs visual verification. The final destination must be goal=true and
-must be bound to a navigation event. Do not invent
-segments, motion policies, geometry, source spans, predicates or event ids.
+Route rules:
+- A destination description with a direction can imply TURN + REACH even if
+  the motion verb is omitted, when the complete dialog later shows that the
+  waypoint was reached.
+- Split an explicit free-flight leg before a target into TURN, MOVE, then any
+  later TURN and target event.
+- If motion ends at a visual object, use REACH rather than MOVE.
+- If an instruction says to pass, fly over, cross, go through, or travel along
+  a visual object, also use REACH, set that object as entity, and put the exact
+  action in relation. Such a REACH is complete only after satisfying the
+  relation to the target, not merely after arriving at its center.
+- Only emit MOVE when no visual object determines where that leg ends.
+- Local uses of "destination" may be intermediate waypoints. Only the last
+  destination of the complete route is goal=true.
+- Keep spatial descriptions such as "north of the long side", "on the right
+  side", and "behind" in relation or spatial_constraints.
+- Do not output observations, queries, progress/state events, entity updates,
+  explanations, or any event type outside the four listed above.
 
-Example 1 input:
-1 INS: Go southwest at seven o'clock to the large blue-roof building.
-Example 1 output:
-{"entities":[{"id":"goal","description":"large blue-roof building","kind":"LANDMARK","goal":true}],"events":[{"type":"REACH","turn":1,"entity":"goal","direction":{"frame":"relative","angle":210}}]}
+Before returning JSON, THINK THROUGH the complete dialog once more and check
+the integrity of the entire event chain from start to finish:
+1. Re-read all INS and QUE in chronological order and summarize the route
+   internally; do not expose this reasoning in the response.
+2. Ensure every stated direction change appears exactly once as TURN and no
+   movement leg or landmark relation is omitted.
+3. Use later QUE/INS statements to remove or revise any earlier REACH that the
+   complete dialog shows was not actually reached, not visible, or only a
+   mistaken local destination.
+4. Ensure an untargeted MOVE has its own free-flight leg. Never emit MOVE
+   immediately before REACH when both describe one continuous movement to the
+   same visual target.
+5. Ensure each intermediate waypoint is reached at the correct chronological
+   point, each event entity is declared, and every declared entity is used by
+   an event or one of its spatial constraints.
+6. Ensure the final goal's REACH is the final displacement event. If TURN,
+   MOVE, AVOID, or another REACH follows it, the earlier goal REACH is
+   premature and must be corrected.
+7. Verify the final JSON contains the complete executable trajectory rather
+   than independent per-turn interpretations. Return JSON only.
 
-Example 2 input:
-1 INS: Fly north, cross two roads and pass the parking lot.
-2 QUE: I crossed the roads. What does the destination look like?
-3 INS: It is the yellow warehouse. Continue east until you reach it.
-Example 2 output:
-{"entities":[{"id":"roads","description":"roads","kind":"BOUNDARY","goal":false},{"id":"parking","description":"parking lot","kind":"REGION","goal":false},{"id":"yellow_warehouse","description":"yellow warehouse","kind":"LANDMARK","goal":true}],"events":[{"type":"CROSS","turn":1,"entity":"roads","direction":{"frame":"absolute","angle":0},"count":2},{"type":"PASS","turn":1,"entity":"parking"},{"type":"REACH","turn":3,"entity":"yellow_warehouse","direction":{"frame":"absolute","angle":90}}]}
+Example input metadata:
+trajectory_id: 1070__3
+starting_heading: 90
+Complete dialog:
+1 INS: Destination is a building not so far from you to the southwest.
+2 QUE: I am on top of the building. Is the destination in my view?
+3 INS: Move towards the 6 o'clock direction and turn 3 o'clock direction and
+grey color building is your destination.
+4 QUE: I move to the grey building at back. What is the destination?
+5 INS: Destination is a ruined courtyard that is brown and white. Go to your
+three o'clock.
+
+Example output:
+{"trajectory_id":"1070__3","starting_heading":{"angle":90},"entities":[{"id":"nearby_building","description":"building not far to the southwest","kind":"LANDMARK","goal":false},{"id":"grey_building","description":"grey color building","kind":"LANDMARK","goal":false},{"id":"goal_courtyard","description":"ruined courtyard that is brown and white","kind":"REGION","goal":true}],"events":[{"id":"e1","turn":1,"type":"TURN","direction":{"frame":"absolute","angle":225,"description":"southwest"}},{"id":"e2","turn":1,"type":"REACH","entity":"nearby_building","relation":"arrive above the building"},{"id":"e3","turn":3,"type":"TURN","direction":{"frame":"relative","angle":180,"clock":"6:00"}},{"id":"e4","turn":3,"type":"MOVE","distance":"limited_unspecified"},{"id":"e5","turn":3,"type":"TURN","direction":{"frame":"relative","angle":90,"clock":"3:00"}},{"id":"e6","turn":3,"type":"REACH","entity":"grey_building","relation":"behind"},{"id":"e7","turn":5,"type":"TURN","direction":{"frame":"relative","angle":90,"clock":"3:00"}},{"id":"e8","turn":5,"type":"REACH","entity":"goal_courtyard"}]}
+
+Second example input metadata:
+trajectory_id: 579__2
+starting_heading: 156
+Complete dialog:
+1 INS: Destination is a parking lot on the north side of a pavement lot to
+your seven o'clock.
+2 QUE: I see a parking lot. Am I near the destination? Where should I go now?
+3 INS: No, you are not near the destination. You have to turn to 8:30 o'clock
+and move forward to reach the destination.
+4 QUE: I see the parking lot. Can I see the destination? How does the
+destination look? Where should I go now?
+5 INS: No. Head in the 1:00 direction. Fly over the off-white building with
+the V-shaped roof. North of the long side of that building will be a parking
+lot. Go to the north side of that lot.
+
+Second example output:
+{"trajectory_id":"579__2","starting_heading":{"angle":156},"entities":[{"id":"pavement_lot","description":"pavement lot","kind":"REGION","goal":false},{"id":"v_roof_building","description":"off-white building with a V-shaped roof","kind":"LANDMARK","goal":false},{"id":"goal_parking_lot","description":"parking lot north of the pavement lot and the V-roof building","kind":"REGION","goal":true}],"events":[{"id":"e1","turn":3,"type":"TURN","direction":{"frame":"relative","angle":255,"clock":"8:30"}},{"id":"e2","turn":3,"type":"MOVE","distance":"limited_unspecified"},{"id":"e3","turn":5,"type":"TURN","direction":{"frame":"relative","angle":30,"clock":"1:00"}},{"id":"e4","turn":5,"type":"REACH","entity":"v_roof_building","relation":"fly over"},{"id":"e5","turn":5,"type":"REACH","entity":"goal_parking_lot","relation":"reach the north side","spatial_constraints":["north of the pavement lot","north of the long side of the off-white V-roof building","initially described at relative 7:00 from the start"]}]}
+
+Why the second example is not parsed turn by turn: Turn 1 describes the final
+goal and its initial location but contains no executed movement. The parking
+lot observed in QUE is explicitly rejected by the following INS. Turn 3 is
+therefore an untargeted movement leg, not an early REACH. The only final REACH
+is created after Turn 5 supplies the V-roof-building landmark and the complete
+north-side spatial constraints.
 """.strip()
 
 
@@ -204,12 +287,36 @@ def _request_chat_completion(
     return _response_content(response.json())
 
 
-def _initial_messages(turns: Sequence[Dict[str, Any]]) -> List[Dict[str, str]]:
+def _parse_request_text(
+    turns: Sequence[Dict[str, Any]],
+    *,
+    plan_id: str,
+    starting_heading_deg: Optional[float],
+) -> str:
+    heading = "unknown" if starting_heading_deg is None else str(float(starting_heading_deg))
+    return (
+        f"trajectory_id: {plan_id}\n"
+        f"starting_heading: {heading}\n"
+        "Complete dialog:\n"
+        + _numbered_dialog(turns)
+    )
+
+
+def _initial_messages(
+    turns: Sequence[Dict[str, Any]],
+    *,
+    plan_id: str,
+    starting_heading_deg: Optional[float],
+) -> List[Dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
-            "content": "Parse these numbered turns:\n" + _numbered_dialog(turns),
+            "content": _parse_request_text(
+                turns,
+                plan_id=plan_id,
+                starting_heading_deg=starting_heading_deg,
+            ),
         },
     ]
 
@@ -218,14 +325,20 @@ def _repair_messages(
     turns: Sequence[Dict[str, Any]],
     previous_content: str,
     issues: Sequence[str],
+    *,
+    plan_id: str,
+    starting_heading_deg: Optional[float],
 ) -> List[Dict[str, str]]:
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "user",
             "content": (
-                "Parse these numbered turns:\n"
-                + _numbered_dialog(turns)
+                _parse_request_text(
+                    turns,
+                    plan_id=plan_id,
+                    starting_heading_deg=starting_heading_deg,
+                )
                 + "\n\nYour previous JSON was structurally unusable:\n"
                 + previous_content
                 + "\n\nFix only these structural issues:\n- "
@@ -256,6 +369,7 @@ def request_model_plan(
     dialog: str,
     *,
     plan_id: str,
+    starting_heading_deg: Optional[float] = None,
     api_token: str = MODEL_API_TOKEN,
     url: str = MODEL_URL,
     model: str = MODEL_NAME,
@@ -265,13 +379,23 @@ def request_model_plan(
     turns = parse_tagged_turns(dialog)
     if not turns:
         raise ValueError("dialog contains no [INS] or [QUE] turns")
-    messages = _initial_messages(turns)
+    messages = _initial_messages(
+        turns,
+        plan_id=plan_id,
+        starting_heading_deg=starting_heading_deg,
+    )
     attempts: List[Dict[str, Any]] = []
     previous_content = ""
     previous_issues: List[str] = []
     for attempt_index in range(2):
         if attempt_index:
-            messages = _repair_messages(turns, previous_content, previous_issues)
+            messages = _repair_messages(
+                turns,
+                previous_content,
+                previous_issues,
+                plan_id=plan_id,
+                starting_heading_deg=starting_heading_deg,
+            )
         content = _request_chat_completion(
             messages,
             api_token=api_token,
@@ -284,9 +408,14 @@ def request_model_plan(
                 raw,
                 plan_id=plan_id,
                 turns=turns,
+                starting_heading_deg=starting_heading_deg,
             )
         except ValueError as exc:
-            plan = InstructionPlan(plan_id=plan_id, turns=turns)
+            plan = InstructionPlan(
+                plan_id=plan_id,
+                starting_heading_deg=starting_heading_deg,
+                turns=turns,
+            )
             issues = [str(exc)]
         attempts.append({
             "attempt": attempt_index + 1,
@@ -329,7 +458,10 @@ def _write_summary(path: Path, rows: Sequence[Dict[str, Any]]) -> None:
         "entity",
         "direction_frame",
         "direction_angle",
-        "mode",
+        "direction_clock",
+        "relation",
+        "distance",
+        "spatial_constraints",
         "count",
         "side",
         "source",
@@ -397,6 +529,7 @@ def compile_dataset_instruction_plans(
             plan, repaired = request_model_plan(
                 dialog,
                 plan_id=plan_id,
+                starting_heading_deg=float(observation.get("starting_angle") or 0.0),
                 api_token=api_token,
                 url=url,
                 model=model,

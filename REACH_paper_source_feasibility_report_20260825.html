@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>REACH 事件：论文源代码对照与可行性分析</title>
+  <style>
+    :root{--bg:#f5f7fb;--card:#fff;--ink:#182230;--muted:#5e6b7b;--line:#dfe5ee;--blue:#2563eb;--cyan:#0891b2;--green:#138a5b;--amber:#a16207;--red:#c2410c;--purple:#6d28d9}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,"Microsoft YaHei","PingFang SC",Arial,sans-serif;line-height:1.62}
+    .wrap{max-width:1240px;margin:0 auto;padding:34px 24px 72px}.hero{background:linear-gradient(135deg,#16213a,#243d70 58%,#0e7490);color:#fff;border-radius:20px;padding:38px 42px;box-shadow:0 16px 42px #18365e22}.hero h1{font-size:32px;line-height:1.2;margin:0 0 12px}.hero p{max-width:920px;margin:8px 0;color:#dce9ff}.meta{font-size:13px;color:#bcd0ef}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:22px 0}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 19px;box-shadow:0 5px 18px #1d35570b}.card h3{margin:0 0 6px;font-size:15px}.metric{font-size:27px;font-weight:750;margin:2px 0}.good{color:var(--green)}.warn{color:var(--amber)}.bad{color:var(--red)}.blue{color:var(--blue)}
+    section{margin-top:28px} h2{font-size:23px;margin:0 0 12px;border-left:5px solid var(--blue);padding-left:12px} h3{font-size:18px;margin:20px 0 8px} p{margin:8px 0}.muted{color:var(--muted)}.small{font-size:13px}.note{background:#eef6ff;border:1px solid #cfe2ff;border-radius:12px;padding:14px 17px}.warning{background:#fff8e8;border:1px solid #f2d38b;border-radius:12px;padding:14px 17px}.success{background:#eefbf4;border:1px solid #bfe9d0;border-radius:12px;padding:14px 17px}
+    table{width:100%;border-collapse:separate;border-spacing:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px}th,td{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#f0f4fa;font-weight:700;color:#27364b}tr:last-child td{border-bottom:0}.tag{display:inline-block;border-radius:999px;padding:2px 9px;margin:2px 4px 2px 0;font-size:12px;font-weight:650;background:#e8eefb;color:#244274}.tag.green{background:#def7e9;color:#09663f}.tag.amber{background:#fff0c7;color:#875500}.tag.red{background:#ffe4db;color:#9d2f0a}.tag.purple{background:#eee7ff;color:#5a20ba}
+    code{font-family:Consolas,"SFMono-Regular",monospace;font-size:0.92em;background:#f1f4f8;border-radius:5px;padding:1px 5px} pre{margin:10px 0;background:#111827;color:#e5edf9;border-radius:11px;padding:15px 17px;overflow:auto;font:13px/1.55 Consolas,"SFMono-Regular",monospace} pre code{background:transparent;padding:0;color:inherit}.flow{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin:16px 0}.flow .node{flex:1 1 160px;min-width:150px;border:1px solid #cdd8e8;background:#fff;border-radius:12px;padding:13px}.flow .arrow{align-self:center;font-size:22px;color:var(--blue);padding:0 3px}.current{border-top:4px solid var(--red)!important}.proposed{border-top:4px solid var(--green)!important}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.kpi{display:flex;justify-content:space-between;gap:15px;border-bottom:1px dashed var(--line);padding:8px 0}.kpi:last-child{border-bottom:0}.priority{font-weight:700;color:var(--blue)}.footer{margin-top:34px;color:var(--muted);font-size:12px;border-top:1px solid var(--line);padding-top:14px}a{color:#1459c7;text-decoration:none}a:hover{text-decoration:underline}
+    @media(max-width:880px){.grid,.three,.two{grid-template-columns:1fr 1fr}.hero{padding:28px 24px}.hero h1{font-size:27px}}@media(max-width:580px){.grid,.three,.two{grid-template-columns:1fr}.wrap{padding:20px 13px}.hero{border-radius:14px}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header class="hero">
+    <div class="meta">2DNav / PSC-AVDN · 源代码审计与实现设计备忘录 · 2026-08-25</div>
+    <h1>REACH 事件：如何从“一次跳到目标”变成“短步、重观测、可修正”的闭环</h1>
+    <p>本报告把当前仓库实现与公开论文代码进行逐段对照，回答两个问题：目标已经在 view 中确定后，现有系统能否移动恰当距离？怎样以较低风险实现类似 AVDN gt 的密集航点轨迹？</p>
+  </header>
+
+  <div class="grid">
+    <div class="card"><h3>当前新 REACH</h3><div class="metric bad">单次 motion</div><div class="muted small">一个事件一次 target selection + 一次 navigation point，然后写入事件终点。</div></div>
+    <div class="card"><h3>旧 ET 学习基线</h3><div class="metric good">已具备闭环</div><div class="muted small">每步预测局部位移，更新 view corners，再调用 <code>_get_obs</code>。</div></div>
+    <div class="card"><h3>第一阶段可行性</h3><div class="metric good">高</div><div class="muted small">无需立刻训练：先在执行层增加 REACH 内层循环。</div></div>
+    <div class="card"><h3>扩散策略迁移</h3><div class="metric warn">中/后置</div><div class="muted small">可借用 receding-horizon 思想，但不能直接搬用机器人动作接口。</div></div>
+  </div>
+
+  <section>
+    <h2>1. 结论先行</h2>
+    <div class="success"><strong>最稳妥的路线：</strong>保留“目标选择”和“目标身份冻结”这两个已有设计，先把当前单次 <code>plan_reach_motion</code> 改造成 <em>REACH 内部的短步执行器</em>：每次只前进一个小步，更新位置/视图，重新计算局部航点，直到通过到达验证。第一版甚至可以使用显式几何插值，不需要新模型。</div>
+    <p>原因是当前项目已经有适合闭环的状态表示：<code>src/env.py</code> 用四边形 <code>current_view_corners</code> 表示当前 view，并且保留 GPS bounds、经纬度比例和 GT path corners；<code>navigation_geometry.py</code> 已提供像素到经纬度的变换。真正缺少的是“事件内部重新观测和重新规划”，而不是另一个更大的视觉模型。</p>
+    <div class="warning"><strong>关键差异：</strong>旧的 <code>src/xview_et/agent.py</code> 已经是 one-step-per-inference 的闭环；新的 <code>Search_Confirmation.py</code> 则在一个 REACH 事件内只调用一次选择和一次 motion，并直接把 <code>position</code> 写成终点。因此，当前首要工作是执行层重构，而非立即替换模型。</div>
+  </section>
+
+  <section>
+    <h2>2. 当前仓库实现审计</h2>
+    <table>
+      <thead><tr><th>模块</th><th>已确认行为</th><th>对“多次小幅修正”的影响</th></tr></thead>
+      <tbody>
+        <tr><td><code>PSC-AVDN/script/ANDH-Full/Search_Confirmation.py:620–819</code></td><td>REACH/AVOID 事件内调用 <code>search_target</code> 一次，再调用 <code>plan_reach_motion</code> 一次；成功后更新一次 <code>position</code>，最后才通过 <code>_record_pose</code> 记录轨迹。</td><td><span class="tag red">阻塞</span>没有事件内的 re-observe/re-plan，也没有每个 micro-step 的 physical trajectory。</td></tr>
+        <tr><td><code>reach_contracts.py:11–166</code></td><td>选择结果和运动结果已分离；motion 结果含 <code>target_point_2d</code>、<code>target_position_latlng</code>、<code>event_position_latlng</code>、offset、confidence。</td><td><span class="tag green">可复用</span>契约边界正确，可在其上增加 <code>motion_iterations</code>，避免破坏 selection。</td></tr>
+        <tr><td><code>search_engine.py:344–477</code></td><td><code>search_target</code> 负责目标身份；<code>plan_reach_motion</code> 负责从固定 selection snapshot 生成一个像素航点并转换为经纬度。</td><td><span class="tag amber">需扩展</span>当前接口接收固定 view paths/corners，不能在事件内部自然地换成新 view。</td></tr>
+        <tr><td><code>grounding_agent.py:247–270, 447–560, 996–1060</code></td><td>工具 <code>finish_navigation_point</code> 只返回一个 <code>[x,y]</code>；提示词明确要求这是“下一时刻导航落点”，不是目标中心，也不能换 candidate。</td><td><span class="tag green">契合</span>单点输出正适合作为 receding-horizon 的一步；但需要循环调用或由本地几何生成后续点。</td></tr>
+        <tr><td><code>src/xview_et/agent.py:386–507, 632–768</code></td><td>模型输出局部位移 ratio、海拔、progress；按位移比例计算距离，调用 <code>move_view_corners</code>，再以新 corners 调用 <code>env._get_obs</code>。</td><td><span class="tag green">现成范式</span>可以直接作为新 REACH 的状态更新参考；只是它输出一个动作，不是 H 个航点序列。</td></tr>
+        <tr><td><code>src/env.py:259–320, 340–374</code></td><td>obs 由当前 corners/directions 渲染；评价使用 IoU、轨迹长度、oracle success、SPL。</td><td><span class="tag amber">需补指标</span>现有指标可保留，但要增加到达误差、过冲、步数和 target switch。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>3. 公开论文源代码对照</h2>
+    <table>
+      <thead><tr><th>论文 / 源码</th><th>代码中真正可借鉴的机制</th><th>映射到当前 AVDN</th><th>判断</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2022/html/Hong_Bridging_the_Gap_Between_Learning_in_Discrete_and_Continuous_Environments_for_Vision-and-Language_Navigation_CVPR_2022_paper.html">CWP / CVPR 2022</a><br><a href="https://github.com/YicongHong/Discrete-Continuous-VLN">官方代码</a></td><td><code>TRM_net.py</code> 将 12 个相机方向组织成局部关系图，输出 120 个角度 × 12 个距离类别；推理时从候选航点中选择 angle-distance 对，环境每次只执行一个动作。</td><td>将 120 角度改为当前 view 的局部方向或连续像素射线，将距离类别改为米制 bins；保留“候选 + 一步执行 + 下一帧重算”的结构。当前为 RGB/top-down，没有 CWP 所依赖的 Habitat depth，因此先用几何距离或轻量 RGB head。</td><td><span class="tag green">架构高可行</span></td></tr>
+        <tr><td><a href="https://general-navigation-models.github.io/vint/">ViNT / CoRL 2023</a><br><a href="https://github.com/robodhruv/visualnav-transformer">官方代码</a></td><td><code>vint.py</code> 的 action head 预测 <code>len_traj_pred</code> 个 2D action，并用 <code>torch.cumsum</code> 把增量变为 waypoint 序列；<code>navigate.py</code> 只选序列中的一个 waypoint（默认中间点），<code>pd_controller.py</code> 将其变成速度。</td><td>可把当前单点 <code>target_point_2d</code> 扩展为短前缀 <code>H</code> 个局部点，但在 AVDN 中不需要 ROS/PID；每个点应转为新 view corners 和经纬度状态，再回到视觉观测。</td><td><span class="tag green">机制高可行</span></td></tr>
+        <tr><td><a href="https://arxiv.org/abs/2303.04137">Diffusion Policy / RSS 2023</a><br><a href="https://github.com/real-stanford/diffusion_policy">官方代码</a></td><td>预测长度为 <code>Tp</code> 的 action sequence，但每次只执行较短的 <code>Ta</code> 前缀，随后重新观测并 replanning；这就是 receding horizon。</td><td>直接借用“预测 H、执行 K、再观测”的调度思想。不要直接迁移机器人 action space、噪声调度和控制器；当前可先设 <code>K=1</code>，作为确定性短步策略。</td><td><span class="tag amber">思想高，代码迁移中</span></td></tr>
+        <tr><td><a href="https://general-navigation-models.github.io/nomad/">NoMaD / ICRA 2024</a></td><td>目标条件的距离预测、动作序列与实时闭环结合，解决“走多远以及下一步往哪走”的耦合问题。</td><td>可借鉴额外的 <code>distance-to-target</code> head，用来动态缩短步长和决定是否停止；不建议第一阶段引入完整扩散训练。</td><td><span class="tag amber">中期</span></td></tr>
+        <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2025/html/Bar_Navigation_World_Models_CVPR_2025_paper.html">Navigation World Models / CVPR 2025</a>、<a href="https://proceedings.iclr.cc/paper_files/paper/2025/file/eb261df4322a8bd0a73093c4d8a0d02d-Abstract-Conference.html">ImagineNav / ICLR 2025</a></td><td>把未来观测/轨迹作为规划约束，强调在动作执行前评估局部后果。</td><td>对当前项目最有价值的是“动作后重新渲染并验证”，而不是建立完整世界模型；可作为后续困难场景的研究方向。</td><td><span class="tag purple">研究储备</span></td></tr>
+        <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Qi_Parse_Search_and_Confirmation_Training-Free_Aerial_Vision-and-Dialog_Navigation_with_Chain-of-Thought_CVPR_2026_paper.html">PSC-AVDN / CVPR 2026</a></td><td>把 target selection 与 motion point 分为独立阶段，固定目标身份，减少目标漂移。</td><td>当前代码已经实现这一思想；缺口在于 motion 阶段没有“短步循环”和 arrival verifier。</td><td><span class="tag green">已落地一半</span></td></tr>
+      </tbody>
+    </table>
+    <div class="note small">源码审计使用公开仓库的实现文件：CWP 的 <code>waypoint_prediction/TRM_net.py</code> 与 <code>vlnce_baselines/common/base_il_trainer.py</code>，ViNT/NoMaD 的 <code>train/vint_train/models/vint/vint.py</code>、<code>deployment/src/navigate.py</code>、<code>deployment/src/pd_controller.py</code>，以及 Diffusion Policy 官方实现。报告没有把外部代码复制进当前仓库；这里只提炼接口和执行机制。</div>
+  </section>
+
+  <section>
+    <h2>4. 为什么当前几何表示适合做小步闭环</h2>
+    <div class="two">
+      <div class="card"><h3>已有稳定坐标链</h3><p><code>view → pixel point → ViewGeoTransform → lat/lng → move_view_corners</code> 已经存在。目标选择只需产出一次稳定的 candidate/bbox；后续步长和局部落点可在同一坐标链上计算。</p><p class="muted small">这比让 Qwen 直接从“目标看起来有多远”回归米数更可控。</p></div>
+      <div class="card"><h3>现有执行粒度可以复用</h3><p>旧 ET 的 <code>a_distance = ||ratio|| × view_edge/2</code> 已把归一化位移变成实际移动距离，再用新 corners 生成下一观测。新 tool-agent 只需把这段逻辑放回 REACH 事件内部。</p><p class="muted small">建议先将最小步限制在 view 短边的 0.10–0.25，具体数值通过验证集标定。</p></div>
+    </div>
+    <pre><code>for k in range(max_reach_steps):
+    obs_k = render(current_view_corners, current_heading)
+    local_point = next_point(fixed_target, obs_k, relation)
+    step = clamp(distance(current, local_point), min_step, max_step)
+    current_view_corners, current_heading = move_view_corners(current_view_corners, current_heading, step)
+    record_micro_pose(current_view_corners, current_heading)
+    if verify_reached(current, target, history): break</code></pre>
+  </section>
+
+  <section>
+    <h2>5. 推荐的状态机与接口改造</h2>
+    <div class="flow">
+      <div class="node current"><strong>当前</strong><br><code>SELECT</code></div><div class="arrow">→</div><div class="node current"><code>PLAN_ONE_POINT</code></div><div class="arrow">→</div><div class="node current"><code>COMMIT_EVENT_END</code></div>
+    </div>
+    <div class="flow">
+      <div class="node proposed"><strong>建议</strong><br><code>SELECT_ONCE</code></div><div class="arrow">→</div><div class="node proposed"><code>APPROACH_LOOP</code><br><span class="small">短步、重观测、固定目标</span></div><div class="arrow">→</div><div class="node proposed"><code>VERIFY</code></div><div class="arrow">→</div><div class="node proposed"><code>DONE / RECOVER</code></div>
+    </div>
+    <h3>5.1 不破坏现有 selection 的契约</h3>
+    <p>保持 <code>TargetSelectionResult</code> 不变，在 <code>ReachMotionResult</code> 旁边增加迭代记录，或将版本升为 <code>reach-stage/v2</code>：</p>
+    <pre><code>{
+  "status": "planned|reached|uncertain|failed",
+  "target_position_latlng": [lat, lng],
+  "event_position_latlng": [lat, lng],
+  "motion_iterations": [
+    {"step_index": 0, "position_before": [...], "target_point_2d": [x,y],
+     "position_after": [...], "step_m": 6.4, "confidence": 0.86,
+     "reach_score": 0.31, "replan_reason": "progress_improved"}
+  ],
+  "termination_reason": "target_overlap|distance_tolerance|no_progress|step_limit"
+}</code></pre>
+    <h3>5.2 目标身份与局部航点分工</h3>
+    <table><thead><tr><th>阶段</th><th>负责什么</th><th>是否每步调用 Qwen/SAM</th></tr></thead><tbody>
+      <tr><td><code>SELECT_ONCE</code></td><td>确认 candidate_id、bbox/mask、目标经纬度锚点。</td><td>一次。只在置信度下降或目标丢失时恢复。</td></tr>
+      <tr><td><code>APPROACH_LOOP</code></td><td>根据当前 view 和固定目标，产生下一个局部点，并用几何变换移动小步。</td><td>第一版可不调用：目标 geocoord 已知时用插值/可通行侧规则；第二版再用 point stage。</td></tr>
+      <tr><td><code>VERIFY</code></td><td>检查目标距离、view/目标区域重叠、IoU progress 是否改善，避免过冲。</td><td>本地计算；必要时请求一次目标再确认。</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>6. 三档实现方案与取舍</h2>
+    <table>
+      <thead><tr><th>优先级</th><th>方案</th><th>改动量</th><th>是否需训练</th><th>预期收益</th><th>风险</th></tr></thead>
+      <tbody>
+        <tr><td class="priority">P0</td><td><strong>确定性短步闭环</strong><br>固定 target geocoord；按剩余距离插值，每步重渲染，动态缩步。</td><td>低</td><td>否</td><td>最快验证“多航点能否降低过冲”；日志和评测先跑通。</td><td>复杂遮挡/绕行能力有限。</td></tr>
+        <tr><td class="priority">P1</td><td><strong>复用旧 ET 的单步 head</strong><br>每个 micro-step 预测 <code>[dx,dy,progress]</code>，接入现有 <code>move_view_corners</code>。</td><td>中</td><td>可先零样本/再微调</td><td>最贴合当前 AVDN 数据和评价；天然生成密集轨迹。</td><td>旧 head 的 progress 停止阈值需重标定。</td></tr>
+        <tr><td class="priority">P1</td><td><strong>轻量 H-waypoint head</strong><br>参照 ViNT 输出 H 个增量，累加成局部 waypoint；只执行 K 个（建议 K=1 或 2）。</td><td>中</td><td>需要密集 GT 监督</td><td>减少单步噪声，仍保留 receding horizon。</td><td>动作尺度、旋转和经纬度坐标要重新定义。</td></tr>
+        <tr><td class="priority">P2</td><td><strong>Diffusion/NoMaD 式策略</strong><br>预测短动作序列，执行前缀后重规划。</td><td>高</td><td>需要训练与采样预算</td><td>可处理多峰路径和复杂局部运动。</td><td>机器人控制代码与 AVDN view-state 不匹配；不适合当前第一步。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>7. 具体落地顺序</h2>
+    <div class="three">
+      <div class="card"><h3>Step 1 · 执行层</h3><p>在 <code>Search_Confirmation.py</code> 增加 <code>execute_reach_closed_loop(...)</code>，将一次 <code>plan_reach_motion</code> 包进最多 N 次迭代。首版只保留一次 selection。</p></div>
+      <div class="card"><h3>Step 2 · 状态刷新</h3><p>给 runtime 增加 <code>render_observation(position, heading, corners)</code> 回调；不要继续把初始 <code>observation</code> 当作整个事件的唯一视图。</p></div>
+      <div class="card"><h3>Step 3 · 到达验证</h3><p>加入距离容差、目标 footprint overlap、连续两步 progress 改善和 no-progress 计数；验证失败进入 <code>RECOVER</code>，而不是立即把事件标成完成。</p></div>
+      <div class="card"><h3>Step 4 · 轨迹记录</h3><p>每个 micro-step 调用 <code>_record_pose</code>，保存前后 position、heading、view corners、step_m、confidence、artifact 路径。</p></div>
+      <div class="card"><h3>Step 5 · P0 标定</h3><p>在验证集扫 <code>min_step/max_step/max_reach_steps/reach_tolerance</code>，先比较过冲率、到达率和平均 micro-steps。</p></div>
+      <div class="card"><h3>Step 6 · 再训练模型</h3><p>若 P0 仍受遮挡限制，再接 P1：用 AVDN 的稠密 GT 生成每步局部位移标签，优先复用旧 ET encoder/head。</p></div>
+    </div>
+    <div class="note"><strong>推荐初始参数（仅作起点）：</strong>每个 REACH 最多 8–12 个 micro-steps；步长限制为当前 view 短边对应米制尺度的 0.10–0.25；若连续 2 步 <code>progress</code> 不升，回退一步并重新定位；目标距离低于容差或目标区域与当前 footprint 的 IoU 达标时停止。最终数值应以验证集标定，不应硬编码为论文结论。</div>
+  </section>
+
+  <section>
+    <h2>8. 必须新增的评测</h2>
+    <table><thead><tr><th>指标</th><th>定义建议</th><th>解释</th></tr></thead><tbody>
+      <tr><td>Reach Success</td><td>通过目标距离/重叠验证的 REACH 事件比例。</td><td>比仅看最终 route goal 更能定位事件级失败。</td></tr>
+      <tr><td>Endpoint Error</td><td>事件结束位置到目标 geocoord/目标区域的米制误差。</td><td>直接衡量“移动恰当距离”。</td></tr>
+      <tr><td>Overshoot Rate</td><td>曾进入目标容差后又离开，或 event_position 超过 relation 需要的侧。</td><td>检验是否真正解决一步过冲。</td></tr>
+      <tr><td>Micro-step Efficiency</td><td>平均步数、总路径长度、每步平均 progress 增益。</td><td>防止通过无限小步刷成功率。</td></tr>
+      <tr><td>Target Stability</td><td>selection 固定后 candidate_id 改变次数。</td><td>确认闭环没有把“重观测”变成目标漂移。</td></tr>
+      <tr><td>Route Metrics</td><td>保留 IoU、GP、SPL、oracle success，并用每个 micro-step 的 trajectory 计算。</td><td>与现有 <code>src/env.py</code> 评测兼容。</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>9. 主要阻塞点与处理建议</h2>
+    <table><thead><tr><th>阻塞</th><th>现状</th><th>建议</th></tr></thead><tbody>
+      <tr><td>视图不会在事件内更新</td><td><code>execute_instruction_plan</code> 接收一次 observation；循环中没有环境渲染/新 corners。</td><td>引入 renderer/state callback；将 position、heading、corners 作为 loop 的显式状态。</td></tr>
+      <tr><td>motion 依赖固定快照</td><td><code>GroundingAgent.run_motion</code> 的设计就是 fixed selection snapshot，适合身份冻结，不适合固定整张 view。</td><td>保留 selection snapshot，但每步重新生成 main/selected-target image；或者首版绕过 Qwen point stage 使用 geocoord 几何。</td></tr>
+      <tr><td>目标坐标持久化不足</td><td>selection 主要保存 candidate/bbox；target lat/lng 在 motion patch 后才得到。</td><td>selection 成功后立即保存一个可追踪的目标锚点；在 motion iterations 中复用它。</td></tr>
+      <tr><td>轨迹只在事件结束记录</td><td><code>physical_trajectory</code> 没有反映事件内部小步。</td><td>把 <code>_record_pose</code> 放入 loop，同时保留 event summary。</td></tr>
+      <tr><td>停止条件偏粗</td><td>当前主要由事件执行成功/失败决定，缺少 no-progress、过冲和目标重叠判定。</td><td>增加本地 <code>verify_reached</code> 与恢复状态；失败要可诊断。</td></tr>
+    </tbody></table>
+  </section>
+
+  <section>
+    <h2>10. 最终判断</h2>
+    <p><strong>可行，而且应先做执行层闭环。</strong>当前代码已经把最难的“目标身份选择”拆开了；view corners、像素到经纬度变换、旧 ET 的单步更新和 AVDN 评价也都可复用。与 CWP、ViNT、Diffusion Policy 对照后，最具迁移价值的是统一的执行原则：<em>局部预测 → 只执行短前缀 → 获取新观测 → 重新规划/验证</em>。</p>
+    <p>建议把“多航点”理解为一串真实执行后的 micro-poses，而不是要求 Qwen 一次输出完整轨迹。这样可以先用确定性几何实现理想行为，再逐步替换局部航点生成器；模型升级不会改变 selection、坐标变换和评测接口。</p>
+    <div class="success"><strong>建议的第一版验收标准：</strong>同一批 REACH 事件上，新增闭环的 Endpoint Error、Overshoot Rate、Reach Success 和 micro-step trajectory 都能稳定输出；route-level SPL/GP 不因无限小步而虚高；目标 candidate_id 在 selection 后保持稳定。</div>
+  </section>
+
+  <section>
+    <h2>11. 2025–2026 年新增顶会论文补充</h2>
+    <p>下面是本次继续检索后，与“目标已确定后如何控制距离、持续纠偏、生成密集航点”最接近的工作。需要注意：论文发表、公开代码和可直接迁移性是三个不同维度，不能只因为论文是顶会就假设代码可以直接接入当前项目。</p>
+    <table>
+      <thead><tr><th>论文 / 会议</th><th>与本问题最相关的设计</th><th>对当前 REACH 的价值</th><th>代码与迁移判断</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://proceedings.mlr.press/v305/hu25e.html">See, Point, Fly (SPF), CoRL 2025</a><br><a href="https://github.com/Hu-chih-yao/see-point-fly">官方代码</a></td><td>把动作预测变成图像中的 2D spatial grounding；迭代标注 2D waypoint，同时预测行进距离，并在执行后继续闭环观测；还会自适应调整距离。</td><td><strong>最直接对应。</strong>当前 Qwen 的 <code>finish_navigation_point</code> 可以作为 SPF 的单步 point；已有像素→经纬度变换可以替代其 2D→3D 位移模块。优先实现“固定目标 + 自适应 step_m + 每步重渲染”。</td><td><span class="tag green">直接迁移</span> UAV 控制接口需要改成 view-corners/lat-lng，但思想和执行循环高度一致。</td></tr>
+        <tr><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/34526">AO-Planner, AAAI 2025</a><br><a href="https://github.com/chen-judge/AO-Planner">官方代码</a></td><td>SAM 提供可通行 affordance，LLM 选择候选 waypoint 并规划低层路径，再由相机内参/深度转换成 3D 坐标；论文还把 waypoint 能力蒸馏为预测器。</td><td>适合解决“目标点选到了，但直线移动会穿过不可通行区域”的问题。当前项目已有 SAM3，可以新增 <code>traversability mask</code>，让局部点从目标中心改为目标前方可到达边界。</td><td><span class="tag green">直接迁移</span> 代码公开，但 Habitat/Python 双环境较重；先抽取 affordance→candidate path 的数据结构。</td></tr>
+        <tr><td><a href="https://proceedings.icra.cc/">TANGO, ICRA 2025</a><br><a href="https://podgorki.github.io/TANGO/">项目页与代码入口</a></td><td>将全局拓扑目标和局部 metric trajectory control 分开；使用深度/可通行性构造 BEV cost map，连续预测局部轨迹，直到抵达目标。</td><td>为当前 <code>REACH_TARGET → LOCAL_APPROACH → VERIFY</code> 提供成熟的分层参照；如果后续出现遮挡或障碍，局部 planner 应接在固定目标之后。</td><td><span class="tag amber">机制可借鉴</span> 更偏机器人局部控制，不是 VLN；当前 top-down 视图可用显式几何替代深度。</td></tr>
+        <tr><td><a href="https://proceedings.neurips.cc/paper_files/paper/2025/file/752b872caba558842490e6ca552b5bce-Paper-Conference.pdf">DynaNav, NeurIPS 2025</a></td><td>基于 ViNT 预测 action 与 waypoint distance vector，并用动态特征选择/early exit 按场景复杂度分配计算量。</td><td>更适合解决多次 micro-step 带来的 Qwen/模型调用成本：简单视图用本地几何或浅层 head，目标遮挡/低置信度时才增加视觉推理。</td><td><span class="tag amber">中期优化</span> 论文核心是效率和动态推理，不是新的到达几何；公开代码整合情况需单独确认。</td></tr>
+        <tr><td><a href="https://proceedings.iclr.cc/paper_files/paper/2025/hash/15ce8e7afe5ee95bad56e3b9be28d3d1-Abstract-Conference.html">Towards Realistic UAV VLN, ICLR 2025</a></td><td>OpenUAV 平台、约 12k 轨迹、UAV-Need-Help 基准和层次化轨迹生成，强调真实飞行动力学而非离散地面动作。</td><td>提醒当前 AVDN 需要区分“事件级目标到达”和“低层可执行运动”；可借鉴其分层数据组织方式来生成密集 micro-trajectory。</td><td><span class="tag purple">数据/基准参考</span> 不是一个可直接插入的 REACH controller。</td></tr>
+        <tr><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/39562">IndoorUAV, AAAI 2026</a></td><td>将长指令拆成短子轨迹，逐段调用低层模型；下一段使用上一段的预测终态观测；同时用 final error、NDTW、oracle success 评估过冲。</td><td><strong>与 AVDN gt 密集航点非常接近。</strong>可以把每个 REACH 事件视为短子轨迹，并把每个 micro-step 的终态观测传给下一次局部规划；其 overshoot 现象也说明必须显式建模 stop/verify。</td><td><span class="tag green">流程直接可借鉴</span> 主要是 benchmark + modular agent，代码公开程度需进一步核对。</td></tr>
+        <tr><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/38878">AerialVLA, AAAI 2026</a></td><td>Progress-Driven Navigation-Query Alternation：根据导航进度决定何时主动提问/修正；结合历史时空融合。</td><td>可将“连续两步无 progress 增益”作为重新选择/请求确认的触发器，而不是每个 micro-step 都重新选目标。</td><td><span class="tag amber">机制可借鉴</span> 更强调在线对话和历史建模，不直接解决像素到距离。</td></tr>
+        <tr><td><a href="https://xiaolousun.github.io/AutoFly/">AutoFly, ICLR 2026</a><br><a href="https://github.com/xiaolousun/AutoFly-VLA">代码仓库</a></td><td>伪深度编码器、渐进式 VLA 训练和自主连续避障；从粗粒度方向/位置指导生成连续动作。</td><td>如果 RGB/top-down 视图缺少尺度，伪深度或几何尺度 head 可以辅助 step_m；但当前项目已有 GPS bounds，优先使用显式尺度。</td><td><span class="tag amber">中期模型参考</span> ICLR 2026 已发表，仓库处于分阶段发布状态。</td></tr>
+        <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Ning_LookasideVLN_Direction-Aware_Aerial_Vision-and-Language_Navigation_CVPR_2026_paper.html">LookasideVLN, CVPR 2026</a></td><td>Egocentric Lookaside Graph、方向关系和单层 lookahead，利用地标—方向关系减少长路径规划成本。</td><td>适合增强 REACH 的 relation/side 约束：<code>pass/cross/before/left/right</code> 不只依赖目标 bbox，而是结合目标和当前 heading 的方向关系。</td><td><span class="tag purple">规划参考</span> 更偏高层方向理解，不能单独替代到达验证。</td></tr>
+        <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Fan_HTNav_A_Hybrid_Navigation_Framework_with_Tiered_Structure_for_Urban_CVPR_2026_paper.html">HTNav, CVPR 2026</a></td><td>宏观路径规划 + 细粒度 action control；显式使用 progress、value、goal prediction heads 和动态导航地图。</td><td>与建议的“事件级 planner + REACH 内层 controller + progress verifier”几乎同构；可借鉴 progress/value head 作为停止或恢复依据。</td><td><span class="tag green">结构高度相关</span> 面向 CityNav 城市场景，当前需要删去地图依赖并保留 progress/goal 控制头。</td></tr>
+        <tr><td><a href="https://proceedings.iclr.cc/paper_files/paper/2026/hash/ceb45c48e29e7f49b0b47edb98e43691-Abstract-Conference.html">NavFoM, ICLR 2026</a></td><td>跨 embodiment、跨任务导航基础模型，显式编码 camera view 和 temporal horizon，覆盖 VLN、object search、tracking 等任务。</td><td>长期可作为统一的“目标选择—局部 waypoint—多视图历史”模型底座；其 temporal horizon token 思路可对应 <code>H/K</code> 航点执行。</td><td><span class="tag purple">远期参考</span> 规模和训练成本都明显超出当前项目第一阶段。</td></tr>
+        <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Dai_History_to_Future_Evolving_Agent_with_Experience_and_Thought_for_CVPR_2026_paper.html">EvoNav, CVPR 2026</a></td><td>Future Chain-of-Thought 预测未来动作/地标，History Chain-of-Experience 总结历史错误并反馈到后续导航。</td><td>可把每次 REACH 的 micro-step 轨迹和失败原因写入 history，指导下一事件或恢复策略；与当前 <code>reasoning</code>/<code>search_logs</code> 设计兼容。</td><td><span class="tag amber">闭环记忆参考</span> 不是低层距离控制器。</td></tr>
+        <tr><td><a href="https://arxiv.org/abs/2605.15964">WorldVLN, 2026 预印本</a><br><a href="https://github.com/EmbodiedCity/WorldVLN.code">代码</a></td><td>短视界世界状态预测→动作解码；每段动作执行后把新观测编码回上下文，形成自回归 closed loop。</td><td><strong>概念上最接近“执行若干小步后再规划”。</strong>可以用于后续把确定性几何 loop 升级为短前缀 action decoder。</td><td><span class="tag purple">尚非顶会定稿</span> 代码可读，但依赖较重，先作为研究原型而非 P0 依赖。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>12. 针对当前项目的优先级重新排序</h2>
+    <div class="kpi"><span><strong>第一优先级</strong>：SPF + AO-Planner 的“2D 点/可通行区域 + 自适应距离 + 闭环”</span><span class="good">直接落地</span></div>
+    <div class="kpi"><span><strong>第二优先级</strong>：IndoorUAV / HTNav 的“短子轨迹、progress/value/goal、显式 stop/verify”</span><span class="good">直接改执行层</span></div>
+    <div class="kpi"><span><strong>第三优先级</strong>：AerialVLA / EvoNav 的“无进展触发再确认、历史错误反馈”</span><span class="warn">中期扩展</span></div>
+    <div class="kpi"><span><strong>第四优先级</strong>：AutoFly / NavFoM / WorldVLN 的伪深度、统一 VLA 或世界模型</span><span class="muted">远期训练</span></div>
+    <div class="note"><strong>最重要的新增证据：</strong>SPF 明确把“2D waypoint + traveling distance + adaptive closed-loop control”作为完整方法；IndoorUAV 明确把长任务拆成短子轨迹并用更新后的终态观测继续执行；HTNav 将 progress/goal prediction 放在宏观规划和细粒度动作控制之间。这三者共同支持当前报告的结论：先补齐 REACH 内循环，收益大于立即更换成大型端到端模型。</div>
+  </section>
+
+  <footer class="footer">
+    主要来源：<a href="https://openaccess.thecvf.com/content/CVPR2022/html/Hong_Bridging_the_Gap_Between_Learning_in_Discrete_and_Continuous_Environments_for_Vision-and-Language_Navigation_CVPR_2022_paper.html">CWP (CVPR 2022)</a> · <a href="https://general-navigation-models.github.io/vint/">ViNT</a> · <a href="https://arxiv.org/abs/2303.04137">Diffusion Policy (RSS 2023)</a> · <a href="https://general-navigation-models.github.io/nomad/">NoMaD</a> · <a href="https://openaccess.thecvf.com/content/CVPR2026/html/Qi_Parse_Search_and_Confirmation_Training-Free_Aerial_Vision-and-Dialog_Navigation_with_Chain-of-Thought_CVPR_2026_paper.html">PSC-AVDN</a> · <a href="https://proceedings.mlr.press/v305/hu25e.html">SPF (CoRL 2025)</a> · <a href="https://ojs.aaai.org/index.php/AAAI/article/view/34526">AO-Planner (AAAI 2025)</a> · <a href="https://ojs.aaai.org/index.php/AAAI/article/view/39562">IndoorUAV (AAAI 2026)</a> · <a href="https://openaccess.thecvf.com/content/CVPR2026/html/Ning_LookasideVLN_Direction-Aware_Aerial_Vision-and-Language_Navigation_CVPR_2026_paper.html">LookasideVLN (CVPR 2026)</a> · <a href="https://proceedings.iclr.cc/paper_files/paper/2026/hash/ceb45c48e29e7f49b0b47edb98e43691-Abstract-Conference.html">NavFoM (ICLR 2026)</a>。仓库文件路径均相对于当前项目根目录；代码行号用于审计定位，可能随后续编辑变化。
+  </footer>
+</main>
+</body>
+</html>

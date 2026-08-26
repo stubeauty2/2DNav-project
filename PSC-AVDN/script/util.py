@@ -501,7 +501,7 @@ def decide_turn_from_land(
     api_key=DEFAULT_API_KEY,
     url=QWEN_URL,
     model=QWEN_MODEL,
-    timeout=120,
+    timeout=60,
     *,
     view="absolute",
     heading_deg=None,

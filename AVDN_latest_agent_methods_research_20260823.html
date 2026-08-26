@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AVDN 最新 Agent 方法调研与低成本改进路线</title>
+  <style>
+    :root{--ink:#172033;--muted:#5f6b7d;--paper:#f5f7fb;--card:#fff;--line:#dce3ed;--navy:#153b67;--blue:#286aa6;--cyan:#0d7880;--green:#176b4a;--amber:#9a5b08;--red:#a63838;--violet:#6750a4;--shadow:0 12px 32px rgba(19,42,74,.08)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--paper);color:var(--ink);font-family:Inter,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;line-height:1.68}a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}code,pre{font-family:"Cascadia Code",Consolas,monospace}code{background:#edf2f8;padding:.1em .35em;border-radius:5px;font-size:.91em}pre{margin:12px 0;padding:15px 17px;background:#101c2d;color:#e7eef8;border-radius:11px;overflow:auto;line-height:1.55;font-size:13px}
+    .hero{background:linear-gradient(125deg,#102b4d 0%,#174d77 54%,#0b7375 100%);color:#fff;padding:54px 24px 45px}.hero-inner,.page{max-width:1180px;margin:auto}.eyebrow{font-size:13px;letter-spacing:.12em;text-transform:uppercase;opacity:.78}.hero h1{font-size:clamp(30px,4.3vw,52px);line-height:1.14;margin:12px 0 16px;max-width:970px}.hero p{font-size:17px;max-width:920px;opacity:.9}.hero-meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:25px}.hero-meta span{border:1px solid rgba(255,255,255,.27);background:rgba(255,255,255,.08);padding:6px 11px;border-radius:999px;font-size:13px}
+    .page{padding:25px 20px 64px}.toc{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:14px;padding:18px 22px;margin:-42px 0 25px;position:relative}.toc strong{display:block;margin-bottom:8px}.toc-links{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:14px}.section{background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow);border-radius:15px;padding:26px 28px;margin:20px 0}.section h2{font-size:25px;color:var(--navy);margin:0 0 17px}.section h3{font-size:19px;color:#24496e;margin:24px 0 10px}.section h4{font-size:16px;margin:17px 0 7px}.lead{font-size:17px}.muted{color:var(--muted)}.small{font-size:13px}.nowrap{white-space:nowrap}
+    .grid{display:grid;gap:14px}.grid-3{grid-template-columns:repeat(3,1fr)}.grid-4{grid-template-columns:repeat(4,1fr)}.metric{border:1px solid var(--line);border-radius:12px;padding:16px;background:#fafcff}.metric b{display:block;font-size:23px;color:var(--navy);margin:2px 0}.metric span{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}.metric.good{border-top:4px solid var(--green)}.metric.warn{border-top:4px solid var(--amber)}.metric.info{border-top:4px solid var(--blue)}
+    .callout{border-left:5px solid var(--blue);background:#f1f7fc;border-radius:8px;padding:14px 17px;margin:15px 0}.callout.green{border-color:var(--green);background:#eef9f4}.callout.amber{border-color:var(--amber);background:#fff8e9}.callout.red{border-color:var(--red);background:#fff1f1}.callout.violet{border-color:var(--violet);background:#f5f1ff}
+    table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:11px;overflow:hidden;margin:14px 0;font-size:13.5px}th,td{padding:10px 11px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#edf2f8;color:#31445d;font-size:13px}tr:last-child td{border-bottom:0}tbody tr:hover{background:#fafcff}.rank{font-weight:800;color:var(--navy)}
+    .tag{display:inline-block;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:700;margin:1px 3px 1px 0;white-space:nowrap}.p0{background:#dff5e9;color:#17633f}.p1{background:#e2effb;color:#1e5b91}.p2{background:#fff0cd;color:#8a5605}.p3{background:#f7dddd;color:#923434}.yes{background:#dcfce7;color:#166534}.partial{background:#fef3c7;color:#92400e}.no{background:#fee2e2;color:#991b1b}.venue{background:#e9e7fb;color:#50438d}.trainfree{background:#e2f5f5;color:#11666d}
+    .flow{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:stretch;margin:18px 0}.flow .node{border:1px solid #c9d7e8;background:#f9fbfe;border-radius:11px;padding:13px 10px;text-align:center;font-size:13px;position:relative}.flow .node strong{display:block;color:var(--navy);font-size:14px}.flow .node:not(:last-child):after{content:"→";position:absolute;right:-11px;top:35%;z-index:2;color:#789;font-size:18px}.flow .hot{border-color:#83c8c4;background:#eefaf8}.flow .new{border-color:#c4ace7;background:#f8f4ff}
+    .method{border:1px solid var(--line);border-radius:13px;padding:19px 20px;margin:15px 0}.method-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px}.method h3{margin:0 0 5px;color:var(--navy)}.score{font-size:24px;font-weight:800;color:var(--green);white-space:nowrap}.method ul,.section ul,.section ol{padding-left:21px}.method li,.section li{margin:5px 0}.two{display:grid;grid-template-columns:1fr 1fr;gap:15px}.mini{border:1px dashed #cbd6e4;border-radius:10px;padding:12px 14px;background:#fcfdff}.mini h4{margin:0 0 6px;color:#345673}.check{color:var(--green);font-weight:700}.cross{color:var(--red);font-weight:700}
+    details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fcfdff}summary{cursor:pointer;padding:11px 14px;font-weight:700;color:#31516f}details>div{padding:0 14px 13px}.footer{max-width:1180px;margin:0 auto;padding:0 22px 45px;color:var(--muted);font-size:12px}.print-note{display:none}
+    @media(max-width:900px){.grid-4,.grid-3,.two{grid-template-columns:1fr 1fr}.flow{grid-template-columns:1fr 1fr}.flow .node:after{display:none}.section{padding:22px 19px}.method-head{display:block}.score{margin-top:5px}}
+    @media(max-width:600px){.grid-4,.grid-3,.two,.flow{grid-template-columns:1fr}.hero{padding:42px 18px}.page{padding-left:12px;padding-right:12px}.toc{margin-top:-28px}th,td{padding:8px;font-size:12px}}
+    @media print{body{background:#fff}.hero{padding:30px;color:#fff}.toc,.section{box-shadow:none}.section{break-inside:avoid}.method{break-inside:avoid}.print-note{display:block}a{color:inherit;text-decoration:underline}.page{max-width:none;padding:12px}.footer{padding-bottom:0}}
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="eyebrow">Research brief · embodied / multimodal / language agents</div>
+      <h1>AVDN 最新 Agent 方法调研与低成本改进路线</h1>
+      <p>面向当前 PSC‑AVDN / AVDN 工程，筛选 2024–2026 年 AAAI、ICML、ICLR、NeurIPS、CVPR、ACL 等顶会方法；同时核查官方论文、源码完整度、依赖和可迁移接口，重点寻找“不重训主干、少改代码即可做可靠消融”的方向。</p>
+      <div class="hero-meta"><span>调研快照：2026‑08‑23</span><span>主线候选：13</span><span>官方源码逐仓核查：12</span><span>结论：优先推理期 Agent 改造</span></div>
+    </div>
+  </header>
+
+  <main class="page">
+    <nav class="toc">
+      <strong>报告导航</strong>
+      <div class="toc-links"><a href="#summary">结论先行</a><a href="#baseline">当前工程诊断</a><a href="#ranking">候选排名</a><a href="#details">重点方法</a><a href="#roadmap">实施路线</a><a href="#eval">评测设计</a><a href="#watch">观察名单</a><a href="#sources">来源与边界</a></div>
+    </nav>
+
+    <section class="section" id="summary">
+      <h2>1. 结论先行</h2>
+      <p class="lead"><strong>不建议第一步替换 AVDN 的 BERT/ET/ViT 主干。</strong>当前最有希望、成本最低的改进点在现有 Qwen3‑VL + SAM3 工具循环外围：先把自然语言事件形式化为可验证几何约束，再增加低置信度时的主动补看与工具式批判，最后利用既有 JSON 轨迹建立跨样本经验/技能记忆。</p>
+      <div class="grid grid-4">
+        <div class="metric good"><span>首选组合</span><b>GCA‑Lite + CRITIC</b>约束计划、验证后执行</div>
+        <div class="metric good"><span>最直接补洞</span><b>ProFocus‑Lite</b>失败前主动裁剪 / 第二视图</div>
+        <div class="metric info"><span>跨样本学习</span><b>XSkill‑Lite</b>不更新参数的经验 + 技能库</div>
+        <div class="metric warn"><span>不优先</span><b>大模型重训</b>AstraNav / OctoNav / 3D‑VLM</div>
+      </div>
+      <div class="callout green"><strong>建议最小论文主张：</strong>提出一个面向航拍对话导航的“约束—验证—恢复—记忆”代理层，在冻结导航与视觉基础模型的前提下，提高 test‑unseen 的 SR/SPL/GP，并同步降低单次成功所需的无效视觉调用。</div>
+      <h3>推荐实施顺序</h3>
+      <ol>
+        <li><strong>P0 / 1–3 天：</strong>GCA‑Lite 事件约束对象 + CRITIC‑Lite 几何/候选验证器；只改 Agent orchestration，不训练。</li>
+        <li><strong>P0 / 再 2–4 天：</strong>ProFocus‑Lite：仅在证据不足时触发目标 crop、相邻尺度或航向偏转视图，失败不立即终止。</li>
+        <li><strong>P1 / 3–7 天：</strong>XSkill‑Lite 或 AWM：从成功/失败 `search_steps` 提取经验与工作流，top‑k 检索到后续路线上下文。</li>
+        <li><strong>P1 / 2–3 天：</strong>HiAgent 式事件分块与摘要，控制长对话、多个事件和候选证据的上下文膨胀。</li>
+        <li><strong>有稳定提升后：</strong>再考虑 TrajRAG‑Lite 的几何‑语义轨迹库或 AFlow 的离线工作流搜索。</li>
+      </ol>
+    </section>
+
+    <section class="section" id="baseline">
+      <h2>2. 当前工程诊断：为什么适合做 Agent 层改进</h2>
+      <div class="two">
+        <div class="mini"><h4>原始学习基线</h4><ul><li>BERT 文本表示；Darknet/ViT 视觉特征。</li><li>LSTM 与 Embodied Transformer 两套导航器。</li><li>连续 4 维输出：平面位移、视野尺度/高度、进度。</li><li>默认最多 10 步，训练 200k iterations；Python 3.9 / Torch 1.11 旧栈。</li></ul></div>
+        <div class="mini"><h4>当前工具代理</h4><ul><li>对话被解析为顺序 `TURN / MOVE / REACH / AVOID` 事件。</li><li>Qwen3‑VL 调用 SAM3 生成并选择目标候选。</li><li>已有确定性像素/地理几何、forward sector 和 relation‑aware point。</li><li>视觉失败立即终止后续事件；默认只看 scale‑5 主视图。</li></ul></div>
+      </div>
+      <div class="flow">
+        <div class="node"><strong>对话指令</strong>解析事件</div>
+        <div class="node new"><strong>约束形式化</strong>参考系 + 目标</div>
+        <div class="node"><strong>候选感知</strong>Qwen + SAM3</div>
+        <div class="node hot"><strong>验证 / 补看</strong>几何批判 + 恢复</div>
+        <div class="node"><strong>顺序执行</strong>地理运动</div>
+        <div class="node new"><strong>经验写回</strong>轨迹 / 技能 / 失败</div>
+      </div>
+      <h3>已发现的结构性机会</h3>
+      <table><thead><tr><th>现状</th><th>风险</th><th>对应方法</th><th>低成本改法</th></tr></thead><tbody>
+        <tr><td>模型能选候选，但规划阶段未被正式几何约束</td><td>语义正确、落点或参考方向错误</td><td>GCA（CVPR 2026）</td><td>把 relation、heading、参考目标、允许区域编译成不可变约束对象</td></tr>
+        <tr><td>只有输出格式/候选 ID 校验</td><td>“合法但不合理”的候选仍可通过</td><td>CRITIC（ICLR 2024）</td><td>执行前调用确定性检查；失败原因反馈给同一模型修正一次</td></tr>
+        <tr><td>单 scale‑5，失败后整条路线停止</td><td>漏检直接变成 SR=0</td><td>ProFocus（CVPR 2026）</td><td>证据门控下发起 crop / 邻近尺度 / 航向偏移查询，不做无差别多尺度</td></tr>
+        <tr><td>丰富的 `search_steps/event_progress` 只用于日志</td><td>每条路线从零开始，重复犯错</td><td>XSkill / AWM / TrajRAG</td><td>离线提取可审计文本经验，检索 top‑k 注入提示词</td></tr>
+        <tr><td>事件、视觉证据和工具轨迹持续累积</td><td>上下文冗余，历史重点被稀释</td><td>HiAgent（ACL 2025）</td><td>以 event 为 subgoal；完成后只保留 1–2 句结果摘要和关键证据 ID</td></tr>
+      </tbody></table>
+      <div class="callout amber"><strong>评测提醒：</strong>工作区已有分析只对少量样本/单例做过对照，不能据此声明总体改进。后续实验必须固定同一验证子集，并统一使用官方 `env.eval_metrics` 的 SR、SPL、GP 以及工具代理的阶段指标。</div>
+    </section>
+
+    <section class="section" id="ranking">
+      <h2>3. 方法优先级总表</h2>
+      <p>评分综合 AVDN 适配度（35%）、无需重训（20%）、源码可复用度（20%）、预期调试周期（15%）与论文新颖性（10%）。星数与文件数仅作为 2026‑08‑23 的仓库成熟度快照，不代表论文质量。</p>
+      <table><thead><tr><th>#</th><th>方法 / 顶会</th><th>核心机制</th><th>源码实查</th><th>AVDN 迁移</th><th>预计周期</th><th>结论</th></tr></thead><tbody>
+        <tr><td class="rank">1</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Chen_Geometrically-Constrained_Agent_for_Spatial_Reasoning_CVPR_2026_paper.html">GCA</a> <span class="tag venue">CVPR 2026</span></td><td>语义解析与确定性几何计算解耦</td><td><a href="https://github.com/gca-spatial-reasoning/gca">官方代码</a>；74 个 Python 文件，完整 workflow/tool；全量依赖重</td><td>只移植约束 schema 与 planner/validator 思路</td><td>1–3 天</td><td><span class="tag p0">P0</span> 最匹配当前几何工具</td></tr>
+        <tr><td class="rank">2</td><td><a href="https://proceedings.iclr.cc/paper_files/paper/2024/hash/fef126561bbf9d4467dbb8d27334b8fe-Abstract-Conference.html">CRITIC</a> <span class="tag venue">ICLR 2024</span></td><td>利用外部工具批判并修正模型输出</td><td><a href="https://github.com/microsoft/ProphetNet/tree/master/CRITIC">官方代码</a>；任务样例可读，框架较旧</td><td>直接包装已有 geometry / SAM 证据</td><td>1–2 天</td><td><span class="tag p0">P0</span> 最小可发表增量</td></tr>
+        <tr><td class="rank">3</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Xue_ProFocus_Proactive_Perception_and_Focused_Reasoning_in_Vision-and-Language_Navigation_CVPR_2026_paper.html">ProFocus</a> <span class="tag venue">CVPR 2026</span></td><td>主动视觉查询 + focused reasoning / BD‑MCTS</td><td>截至快照未找到公开实现</td><td>先做门控式 crop/尺度重试，不照搬 MCTS</td><td>2–4 天</td><td><span class="tag p0">P0</span> 直接修补“漏检即终止”</td></tr>
+        <tr><td class="rank">4</td><td><a href="https://openreview.net/forum?id=AjP1yvCyoG">XSkill</a> <span class="tag venue">ICML 2026</span></td><td>视觉轨迹提炼 action experience + task skill</td><td><a href="https://github.com/XSkill-Agent/XSkill">官方代码</a>；38 个 Python 文件；提取、合并、检索齐全</td><td>复用 JSON memory 与 embedding retriever</td><td>3–7 天</td><td><span class="tag p1">P1</span> 最佳跨路线学习</td></tr>
+        <tr><td class="rank">5</td><td><a href="https://aclanthology.org/2025.acl-long.1575/">HiAgent</a> <span class="tag venue">ACL 2025</span></td><td>以 subgoal 分块并摘要工作记忆</td><td><a href="https://github.com/HiAgent2024/HiAgent">官方代码</a>；核心 agent 约 299 行 + 独立 summarizer</td><td>event 天然对应 subgoal</td><td>2–3 天</td><td><span class="tag p1">P1</span> 简洁且低风险</td></tr>
+        <tr><td class="rank">6</td><td><a href="https://proceedings.mlr.press/v267/wang25bx.html">AWM</a> <span class="tag venue">ICML 2025</span></td><td>从成功轨迹归纳可复用工作流并检索</td><td><a href="https://github.com/zorazrw/agent-workflow-memory">官方代码</a>；Apache‑2.0；FAISS/embedding 检索明确</td><td>按事件关系与目标类别归纳 route workflow</td><td>2–4 天</td><td><span class="tag p1">P1</span> XSkill 的轻量替代</td></tr>
+        <tr><td class="rank">7</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Wang_TrajRAG_Retrieving_Geometric-Semantic_Experience_for_Zero-Shot_Object_Navigation_CVPR_2026_paper.html">TrajRAG</a> <span class="tag venue">CVPR 2026</span></td><td>topo‑polar 几何‑语义轨迹与粗到细检索</td><td>截至快照未找到官方代码</td><td>航拍路径有 GPS/heading，表示转换很自然</td><td>5–10 天</td><td><span class="tag p1">P1</span> 中期最值得形成方法点</td></tr>
+        <tr><td class="rank">8</td><td><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/067437c6d5d0369b6d09200bef89715b-Abstract-Conference.html">EfficientNav</a> <span class="tag venue">NeurIPS 2025</span></td><td>语义记忆裁剪 + KV cache 复用</td><td><a href="https://github.com/PKU-SEC-Lab/EfficientNav">官方代码</a>；仅 7 文件但主脚本 1,032 行，硬编码大显存 LLaVA</td><td>只借鉴检索/缓存，不直接运行</td><td>1–2 周</td><td><span class="tag p2">P2</span> 代码耦合较重</td></tr>
+        <tr><td class="rank">9</td><td><a href="https://proceedings.iclr.cc/paper_files/paper/2025/hash/5492ecbce4439401798dcd2c90be94cd-Abstract-Conference.html">AFlow</a> <span class="tag venue">ICLR 2025 Oral</span></td><td>MCTS 搜索代码表示的 agent workflow</td><td><a href="https://github.com/FoundationAgents/AFlow">官方代码</a>；MIT；73 个 Python 文件</td><td>用 40–100 条 dev 自动搜索提示词/重试策略</td><td>5–10 天 + API</td><td><span class="tag p2">P2</span> 等稳定评测后再做</td></tr>
+        <tr><td class="rank">10</td><td><a href="https://ojs.aaai.org/index.php/AAAI/article/view/40975">SPIRAL</a> <span class="tag venue">AAAI 2026</span></td><td>Planner–Simulator–Critic 嵌入 MCTS</td><td><a href="https://github.com/IBM/SPIRAL">官方代码</a>；Apache‑2.0；18 个 Python 文件</td><td>需要可回滚的环境模拟与稠密 value</td><td>1–2 周</td><td><span class="tag p2">P2</span> 适合作为后续规划器</td></tr>
+        <tr><td class="rank">11</td><td><a href="https://openaccess.thecvf.com/content/CVPR2025/html/Yin_UniGoal_Towards_Universal_Zero-shot_Goal-oriented_Navigation_CVPR_2025_paper.html">UniGoal</a> <span class="tag venue">CVPR 2025</span></td><td>统一 goal graph / scene graph 与图匹配</td><td><a href="https://github.com/bagh2178/UniGoal">官方代码</a>；MIT；163 个 Python 文件，Habitat/Detectron2/PyTorch3D</td><td>目标图思想可用，整仓不适配 2D 航拍</td><td>2–4 周</td><td><span class="tag p2">P2</span> 不宜作为快速实验</td></tr>
+        <tr><td class="rank">12</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Hu_AstraNav-Memory_Contexts_Compression_for_Long_Memory_CVPR_2026_paper.html">AstraNav‑Memory</a> <span class="tag venue">CVPR 2026</span></td><td>DINOv3 + 视觉 token 压缩 + Qwen2.5‑VL 长记忆</td><td><a href="https://github.com/amap-cvlab/AstraNav-Memory">官方训练/推理代码</a>；4k+ Python 文件（含 vendored Transformers），Torch ≥2.6</td><td>需新环境、训练/权重与 Habitat 迁移</td><td>数周</td><td><span class="tag p3">P3</span> 与“低成本”目标冲突</td></tr>
+        <tr><td class="rank">13</td><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Dai_History_to_Future_Evolving_Agent_with_Experience_and_Thought_for_CVPR_2026_paper.html">EvoNav</a> <span class="tag venue">CVPR 2026</span></td><td>History Chain‑of‑Experience + Future CoT</td><td><a href="https://github.com/daiguangzhao/EvoNav_CVPR2026">公开仓库</a>只有 5 个静态文件、0 Python</td><td>概念可融入 XSkill/CRITIC，但无法快速复用源码</td><td>自行实现 3–5 天</td><td><span class="tag p2">P2</span> 论文好，代码未就绪</td></tr>
+      </tbody></table>
+    </section>
+
+    <section class="section" id="details">
+      <h2>4. 六个重点方法：如何映射到当前数据集与代码</h2>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.1 GCA‑Lite：把“语言理解”与“几何执行”真正解耦</h3><div><span class="tag p0">首选</span><span class="tag trainfree">Training‑free</span><span class="tag venue">CVPR 2026</span></div></div><div class="score">9.2 / 10</div></div>
+        <p>GCA 的关键不是完整 3D 工具栈，而是先生成形式化任务约束，再让后续工具调用只能在该约束内计算。当前工程已经有 heading、GPS、candidate mask、forward sector 和 relation，缺的正是一个不可变的约束对象。</p>
+        <div class="two"><div class="mini"><h4>建议新增最小结构</h4><pre>{
+  "reference_frame": "heading_up",
+  "origin": "current_agent_position",
+  "target_event": "e3",
+  "relation": "pass_left_of",
+  "allowed_sector_deg": [-15, 15],
+  "objective": "select target then compute legal waypoint",
+  "hard_checks": ["registered_candidate", "target_role",
+                  "forward_intersection", "non_duplicate"]
+}</pre></div><div class="mini"><h4>落点位置</h4><ul><li>在 `run_sequential_plan()` 每个 `REACH/AVOID` 前构造 constraint。</li><li>候选搜索提示词只读语义部分；几何模块只读 constraint + candidate。</li><li>将所有 hard check 结果写入 `search_steps[].verification`。</li><li>不引入 Ray/Open3D；只参考官方 repo 的 analyst → planner → executor 分层。</li></ul></div></div>
+        <p><strong>可验证消融：</strong>无约束 / 仅输出校验 / 完整 constraint。重点看 relation 错误率、非法落点率、SR/SPL。</p>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.2 CRITIC‑Lite：只在工具证据冲突时自我修正</h3><div><span class="tag p0">首选</span><span class="tag trainfree">Training‑free</span><span class="tag venue">ICLR 2024</span></div></div><div class="score">9.0 / 10</div></div>
+        <p>CRITIC 强调“不能只让模型反思，必须让外部工具提供可核验反馈”。这与已有的 deterministic geometry 极其契合。建议避免无条件增加一次模型调用，而使用证据门控。</p>
+        <table><thead><tr><th>触发条件</th><th>工具反馈</th><th>允许的修正</th></tr></thead><tbody>
+          <tr><td>候选不与前向扇区相交，或距离显著异常</td><td>方向差、最小像素距离、mask/sector 交点</td><td>换同次注册候选，或请求一次补看</td></tr>
+          <tr><td>relation‑aware point 不在允许区域</td><td>point-in-mask / side-of-object / clearance 结果</td><td>只重算 point，不得更换目标</td></tr>
+          <tr><td>多目标计数或重复实例</td><td>candidate_id、地理距离、IoU/重复判定</td><td>选择未使用实例</td></tr>
+          <tr><td>证据充分且所有硬约束通过</td><td>PASS</td><td>不调用 critic，直接执行</td></tr>
+        </tbody></table>
+        <p><strong>成本控制：</strong>最多一次 critique→revise；将“修正后仍失败”作为可分析错误，不开启无限循环。</p>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.3 ProFocus‑Lite：从“单图失败”改为“按需补证据”</h3><div><span class="tag p0">首选概念</span><span class="tag no">暂无公开代码</span><span class="tag venue">CVPR 2026</span></div></div><div class="score">8.8 / 10</div></div>
+        <p>论文使用主动感知与 BD‑MCTS。对本工程无需先实现完整树搜索，最小版本只增加一个“缺什么证据”的结构化判断和三种受限视觉动作：</p>
+        <ul><li><strong>目标过小：</strong>以候选/语义区域为中心裁剪放大，再送 Qwen 或 SAM3。</li><li><strong>前向不可见但锚点可见：</strong>生成 ±15°/±30° 航向偏移视图，最多二选一。</li><li><strong>SAM 无候选：</strong>使用一次上位类别/外观短语重写；仍失败才终止。</li></ul>
+        <div class="callout"><strong>与当前代码的直接关系：</strong>现有 README 明确只提交 scale‑5 主视图，失败不做第二尺度且整条路线停止；因此该消融的因果链最清晰，预期首先提升目标召回与 oracle SR。</div>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.4 XSkill‑Lite：把日志变成可复用的视觉经验与技能</h3><div><span class="tag p1">强推荐</span><span class="tag yes">完整官方代码</span><span class="tag venue">ICML 2026</span></div></div><div class="score">8.7 / 10</div></div>
+        <p>XSkill 将知识拆成两类：action‑level experience（局部战术）与 task‑level skill（结构化流程），且提取与检索都能参考图像。官方仓库已有 trajectory summary、cross‑rollout critique、skill builder、experience merge、embedding cache 和 top‑k retrieval；是本次源码核查中最接近当前工具代理形态的实现。</p>
+        <div class="two"><div class="mini"><h4>AVDN Experience 示例</h4><pre>{
+  "trigger": "small target + no SAM candidate",
+  "evidence": "scale5; target=parking booth",
+  "action": "crop anchor region; query superclass",
+  "outcome": "candidate found on retry",
+  "scope": "overhead urban maps",
+  "confidence": 0.82
+}</pre></div><div class="mini"><h4>AVDN Skill 示例</h4><pre>SKILL: pass-left-of landmark
+1. Lock heading-up reference frame.
+2. Select complete target instance.
+3. Verify forward-sector intersection.
+4. Compute waypoint on target's left side.
+5. Preserve clearance; execute once.</pre></div></div>
+        <ul><li>只从官方指标成功或人工确认的轨迹提炼正经验；失败轨迹先做错误归因再写入“avoid rule”。</li><li>按 `target category + relation + scene type + failure signature` 检索 top‑3，避免把整条相似路线塞进上下文。</li><li>官方实现要求 Python 3.11 / Torch 2.8；建议抽取纯 JSON/embedding 模块到 sidecar，不污染 Python 3.9/Torch 1.11 导航环境。</li></ul>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.5 HiAgent：event 即 subgoal，完成后压缩历史</h3><div><span class="tag p1">低风险</span><span class="tag yes">完整官方代码</span><span class="tag venue">ACL 2025</span></div></div><div class="score">8.2 / 10</div></div>
+        <p>HiAgent 在生成动作前显式提出 subgoal，完成后把该段 action‑observation 历史替换为摘要，只保留与当前 subgoal 相关的工作记忆。论文报告跨五个长程任务获得约 2× 成功率并减少 3.8 个平均步骤；这些数字来自原论文任务，不能直接外推到 AVDN。</p>
+        <ul><li>将每个解析事件作为一个 subgoal，不另做复杂分解。</li><li>事件完成后保留：目标类别、candidate_id、最终 GPS、heading、relation、验证结果、失败原因。</li><li>原始图像和候选 sheet 留在磁盘，以 artifact path 引用，不重复送入后续事件。</li><li>官方核心实现很轻：agent 约 299 行，trajectory summarizer 独立；可直接参考逻辑重写。</li></ul>
+      </article>
+
+      <article class="method">
+        <div class="method-head"><div><h3>4.6 TrajRAG‑Lite：中期形成更“导航专属”的方法贡献</h3><div><span class="tag p1">中期方法点</span><span class="tag no">暂无公开代码</span><span class="tag venue">CVPR 2026</span></div></div><div class="score">8.0 / 10</div></div>
+        <p>TrajRAG 将过往导航压缩为 topo‑polar 几何‑语义经验，并进行分层检索。AVDN 天然拥有 GPS、航向、视野角和事件语义，比室内 RGB‑D 更容易构造 2D 版本：</p>
+        <pre>route memory = [
+  (event_type, target_semantics, relation,
+   distance_bin, bearing_bin, scale_bin,
+   detector_outcome, verifier_outcome)
+]</pre>
+        <p>建议先用离散 polar bins + BM25/embedding 做轻量实现，不必复现论文 3D frontier。与 XSkill 的区别是：XSkill 存“怎么做”，TrajRAG 存“在什么几何‑语义局面下什么做法成功”。两者可形成互补消融。</p>
+      </article>
+    </section>
+
+    <section class="section" id="roadmap">
+      <h2>5. 建议实施路线：两周内得到可判定结果</h2>
+      <table><thead><tr><th>阶段</th><th>代码改动</th><th>产物</th><th>继续 / 停止门槛</th></tr></thead><tbody>
+        <tr><td><strong>D0：冻结基线</strong><br>0.5–1 天</td><td>固定 40–100 条 val/test‑unseen‑full 子集、模型版本、温度、后端、调用预算与随机种子</td><td>每条路线完整 JSON、官方 SR/SPL/GP、阶段召回与成本</td><td>无法复现则先停止方法开发</td></tr>
+        <tr><td><strong>D1：GCA‑Lite</strong><br>1–2 天</td><td>新增 `EventConstraint`、reference frame、objective、hard checks；只改 orchestration</td><td>约束生成正确率、非法动作率</td><td>非法动作显著下降且 API 成本基本不变</td></tr>
+        <tr><td><strong>D2：CRITIC‑Lite</strong><br>1 天</td><td>验证失败才 feedback→revise 一次；记录修正前后差异</td><td>critic 触发率、修复率、误修率</td><td>修复率高于误修率，平均调用增量可控</td></tr>
+        <tr><td><strong>D3：ProFocus‑Lite</strong><br>2–4 天</td><td>受限 crop / 邻尺度 / 航向偏移；增加 `recovery_budget=1`</td><td>目标候选召回、恢复成功率、额外延迟</td><td>oracle SR/SR 提升；若仅增调用不增召回则停止</td></tr>
+        <tr><td><strong>D4：HiAgent</strong><br>1–2 天</td><td>事件摘要、artifact 引用、当前事件局部上下文</td><td>prompt tokens、步骤正确率、延迟</td><td>token/延迟下降且 SR 不退化</td></tr>
+        <tr><td><strong>D5：XSkill‑Lite</strong><br>3–5 天</td><td>从 D0–D4 轨迹离线提取经验/技能；top‑3 检索注入</td><td>跨路线增益、检索命中、负迁移率</td><td>unseen 提升且不依赖 test 标签</td></tr>
+      </tbody></table>
+
+      <h3>建议的最终 Agent 控制流</h3>
+      <pre>for event in plan.events:
+    constraint = formalize(event, heading, current_position)
+    memory = retrieve_experience(event, constraint, top_k=3)
+    observation = render_primary_view(scale=5)
+    proposal = qwen_sam_select(observation, constraint.semantic, memory)
+
+    verdict = deterministic_verify(proposal, constraint)
+    if verdict.is_uncertain and recovery_budget > 0:
+        observation += active_perception(verdict.missing_evidence)
+        proposal = revise_with_tool_feedback(proposal, verdict, observation)
+        verdict = deterministic_verify(proposal, constraint)
+
+    if not verdict.pass:
+        record_failure_and_stop(event, verdict)
+    execute(proposal.waypoint)
+    summarize_subgoal(event, proposal, verdict)
+record_experience_if_evidence_is_reliable()</pre>
+
+      <h3>推荐改动位置</h3>
+      <table><thead><tr><th>文件 / 模块</th><th>建议职责</th><th>避免事项</th></tr></thead><tbody>
+        <tr><td><code>ANDH-Full/Search_Confirmation.py</code></td><td>事件级 constraint、recovery budget、verification 与摘要生命周期</td><td>不要把更多模型逻辑继续堆入单个顺序循环</td></tr>
+        <tr><td><code>ANDH-Full/grounding_agent.py</code></td><td>semantic proposal、critic feedback、active visual query schema</td><td>不让模型直接计算经纬度或绕过候选注册</td></tr>
+        <tr><td><code>visual_grounding/navigation_geometry.py</code></td><td>纯确定性硬约束、关系与可达性验证</td><td>不读取 LLM 文本理由决定 PASS</td></tr>
+        <tr><td>新增 <code>agent_memory/</code></td><td>轨迹规范化、经验提取、embedding cache、top‑k 检索、数据泄漏保护</td><td>不得从 test ground truth 写入未来推理记忆</td></tr>
+      </tbody></table>
+    </section>
+
+    <section class="section" id="eval">
+      <h2>6. 评测与消融：保证结果可写进论文</h2>
+      <h3>三层指标</h3>
+      <div class="grid grid-3">
+        <div class="metric info"><span>任务层</span><b>SR / SPL / GP</b>官方 `env.eval_metrics`；同时报告 oracle SR</div>
+        <div class="metric good"><span>Agent 层</span><b>Recall / Repair</b>候选召回、验证通过、恢复成功、误修率</div>
+        <div class="metric warn"><span>效率层</span><b>Calls / Tokens / s</b>每事件视觉调用、LLM tokens、端到端延迟、成功成本</div>
+      </div>
+      <h3>最小消融矩阵</h3>
+      <table><thead><tr><th>ID</th><th>Constraint</th><th>Critic</th><th>Active perception</th><th>Hierarchical WM</th><th>Cross‑trial memory</th><th>回答的问题</th></tr></thead><tbody>
+        <tr><td>B0</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>当前基线</td></tr>
+        <tr><td>A1</td><td>✓</td><td>—</td><td>—</td><td>—</td><td>—</td><td>形式化约束是否减少几何错误？</td></tr>
+        <tr><td>A2</td><td>✓</td><td>✓</td><td>—</td><td>—</td><td>—</td><td>工具反馈能否修复合法但错误的输出？</td></tr>
+        <tr><td>A3</td><td>✓</td><td>✓</td><td>✓</td><td>—</td><td>—</td><td>按需补看能否提升召回与 SR？</td></tr>
+        <tr><td>A4</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>—</td><td>压缩历史能否降成本而不损伤性能？</td></tr>
+        <tr><td>A5</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>AWM</td><td>文本工作流是否带来跨路线迁移？</td></tr>
+        <tr><td>A6</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>XSkill</td><td>经验 + 技能双流是否优于单工作流？</td></tr>
+      </tbody></table>
+      <h3>数据泄漏与统计要求</h3>
+      <ul><li>记忆库只能由 train / val‑seen 或明确的开发集轨迹构建；test‑unseen 的 GT 不得进入经验生成。</li><li>LLM/VLM 版本、temperature、图像编码、SAM 后端、候选阈值和预算全部固定。</li><li>报告每条路线 paired 结果；SR 用配对 bootstrap 置信区间，连续指标同时给均值、标准差和置信区间。</li><li>至少区分 parser failure、candidate miss、wrong candidate、wrong point、geometry rejection、timeout 六类错误。</li><li>所有“论文提升数字”只作为原任务证据，不当作 AVDN 的预期提升值。</li></ul>
+    </section>
+
+    <section class="section" id="watch">
+      <h2>7. 最新方向观察名单与暂缓理由</h2>
+      <details open><summary>值得持续跟踪，但不作为第一轮实现</summary><div>
+        <table><thead><tr><th>方法</th><th>亮点</th><th>源码状态</th><th>暂缓原因</th></tr></thead><tbody>
+          <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Dai_History_to_Future_Evolving_Agent_with_Experience_and_Thought_for_CVPR_2026_paper.html">EvoNav</a> · CVPR 2026</td><td>历史经验 + 未来 landmark/action 预测；与连续失败问题高度相关</td><td>公开 repo 为静态项目页，0 Python</td><td>先以 XSkill + one-step lookahead 近似，等待代码</td></tr>
+          <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Hu_AstraNav-Memory_Contexts_Compression_for_Long_Memory_CVPR_2026_paper.html">AstraNav‑Memory</a> · CVPR 2026</td><td>视觉 token 约 10–20× 压缩，可保留数百帧</td><td>训练与推理完整</td><td>Torch ≥2.6、Habitat、Qwen2.5‑VL/DINOv3；需要较大迁移和算力</td></tr>
+          <tr><td><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/e1a1847e39a7b79b41199176b152f0e6-Abstract-Conference.html">Dynam3D</a> · NeurIPS 2025</td><td>动态分层 3D token 与长期记忆</td><td>论文未给可直接获取的官方实现</td><td>依赖 posed RGB‑D 和 3D‑VLM 训练，与航拍 2D 数据不匹配</td></tr>
+          <tr><td><a href="https://proceedings.neurips.cc/paper_files/paper/2025/hash/96889893231d651898b0de42fdbee3a6-Abstract-Conference.html">Memo</a> · NeurIPS 2025</td><td>周期性 summary token 的高效长期 RL 记忆</td><td>未找到官方代码链接</td><td>需要 transformer policy 与 RL 训练，不是快速增量</td></tr>
+          <tr><td><a href="https://openaccess.thecvf.com/content/CVPR2026/html/Gao_OctoNav_Towards_Generalist_Embodied_Navigation_CVPR_2026_paper.html">OctoNav‑R1</a> · CVPR 2026</td><td>Think‑Before‑Action、SFT + GRPO + online RL</td><td>以项目后续发布为准</td><td>数据构建与三阶段训练成本高</td></tr>
+          <tr><td><a href="https://aclanthology.org/2026.acl-long.69/">SAGE</a> · ACL 2026</td><td>用 GRPO 学习如何验证和应用 skill library</td><td>论文页未给可快速复用入口</td><td>应在 XSkill‑Lite 证明技能库有效后再考虑 RL</td></tr>
+          <tr><td><a href="https://aclanthology.org/2026.acl-long.583/">Memory‑R1</a> · ACL 2026</td><td>Memory Manager + Answer Agent 主动 ADD/UPDATE/DELETE/NOOP</td><td>需再核对代码发布</td><td>面向对话记忆且需 PPO/GRPO；可借鉴操作 schema</td></tr>
+        </tbody></table>
+      </div></details>
+      <details><summary>作为基础对照而非“最新主方法”</summary><div>
+        <ul><li><a href="https://proceedings.mlr.press/v235/zhou24r.html">LATS（ICML 2024）</a>：MCTS + value + reflection，<a href="https://github.com/lapisrocks/LanguageAgentTreeSearch">源码完整</a>；但当前环境不可廉价回滚，直接移植会增加大量调用。</li><li><a href="https://ojs.aaai.org/index.php/AAAI/article/view/29936">ExpeL（AAAI 2024 Oral）</a>：跨 trial 经验学习，<a href="https://github.com/LeapLabTHU/ExpeL">源码完整</a>；适合作为 XSkill/AWM 的经典 baseline。</li><li><a href="https://aclanthology.org/2024.acl-long.292/">Agent‑Pro（ACL 2024）</a>：policy-level reflection，<a href="https://github.com/zwq2018/Agent-Pro">官方代码</a>主要耦合棋牌游戏环境；概念可用，代码迁移价值有限。</li></ul>
+      </div></details>
+    </section>
+
+    <section class="section" id="sources">
+      <h2>8. 来源、源码核查与结论边界</h2>
+      <p>论文结论优先来自官方会议 proceedings / OpenReview / ACL Anthology / PMLR；代码状态来自作者或论文明确链接的 GitHub 仓库。未以博客或二手解读作为方法事实依据。</p>
+      <h3>顶会覆盖</h3>
+      <table><thead><tr><th>会议</th><th>本报告重点论文</th><th>用途</th></tr></thead><tbody>
+        <tr><td>CVPR 2025–2026</td><td>GCA、ProFocus、TrajRAG、AstraNav‑Memory、EvoNav、UniGoal、OctoNav</td><td>空间约束、主动感知、导航记忆与通用导航</td></tr>
+        <tr><td>ICML 2024–2026</td><td>XSkill、AWM、LATS</td><td>经验/技能、工作流记忆、树搜索规划</td></tr>
+        <tr><td>ICLR 2024–2025</td><td>CRITIC、AFlow</td><td>工具验证自修正、自动工作流搜索</td></tr>
+        <tr><td>NeurIPS 2025</td><td>EfficientNav、Dynam3D、Memo</td><td>语义记忆检索、3D/长程记忆、效率</td></tr>
+        <tr><td>ACL 2024–2026</td><td>HiAgent、SAGE、Memory‑R1、Agent‑Pro</td><td>工作记忆、技能库、自演化</td></tr>
+        <tr><td>AAAI 2024–2026</td><td>SPIRAL、ExpeL、UrbanNav / SpNav（相关任务）</td><td>反思式规划、经验学习、城市/空间导航</td></tr>
+      </tbody></table>
+      <h3>源码快照证据</h3>
+      <ul><li>GCA：102 个文件 / 74 Python；LangGraph + Ray + Open3D 等完整工具工作流，适合“读结构、轻移植”，不适合塞进旧环境。</li><li>XSkill：59 个文件 / 38 Python；经验提取、批判、合并、embedding cache、技能生成与推理入口均存在。</li><li>AWM：55 个文件 / 29 Python；工作流文本、FAISS 检索和两个 web benchmark 实现齐全。</li><li>HiAgent：仓库很大但核心逻辑简单；`ours_agent.py` 约 299 行，另有独立 trajectory summarizer。</li><li>EfficientNav：7 个文件 / 3 Python；主脚本约 1,032 行并直接加载大模型，复现完整论文系统的可维护性一般。</li><li>EvoNav：5 个静态文件 / 0 Python；不能将“仓库存在”误写为“代码已发布”。</li></ul>
+      <div class="callout red"><strong>边界：</strong>本报告完成的是方法与代码可行性调研，不包含在 AVDN 上的实际训练/推理结果。任何预期提升都必须由上述固定子集和正式指标验证。</div>
+      <p class="small muted">仓库元数据与发布状态会变化；本页所有“已有/未找到代码”均限定在 2026‑08‑23 调研快照。打印时外部链接仍可作为参考文献入口。</p>
+    </section>
+  </main>
+
+  <footer class="footer">AVDN Latest Agent Methods Research · Generated for the local PSC‑AVDN workspace · 2026‑08‑23</footer>
+</body>
+</html>
