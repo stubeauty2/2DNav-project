@@ -1,4 +1,5 @@
 import os
+import argparse
 import sys
 import re
 import csv
@@ -46,8 +47,12 @@ SCALE_FACTOR       = 5
 FIXED_CROP_SIDE    = 768
 
 DEFAULT_API_KEY = os.getenv("API_KEY", "")
-QWEN_URL        = ""
-QWEN_MODEL      = ""
+QWEN_URL        = os.getenv("QWEN_URL", "")
+QWEN_MODEL      = os.getenv("QWEN_MODEL", "qwen3-vl-plus")
+GROUNDING_BACKEND = os.getenv("GROUNDING_BACKEND", "legacy").strip().lower()
+VISION_TOOL_URL = os.getenv("VISION_TOOL_URL", "http://127.0.0.1:8765")
+MAX_TOOL_CALLS = int(os.getenv("MAX_TOOL_CALLS", "4"))
+QWEN_API_TIMEOUT = float(os.getenv("QWEN_API_TIMEOUT", "600"))
 
 def _haversine_m(lat1, lng1, lat2, lng2):
     R = 6371000.0
@@ -89,6 +94,54 @@ def _patch_xy_to_latlng(u, v, view_corners, ob):
     lat = lat_max - (Y / H_img) * (lat_max - lat_min)
     return [lat, lng]
 
+def _sam3_locate_bbox_in_view(
+    dest_desc, patch_main_bgr, *, api_key, url, model, vision_tool_url,
+    max_tool_calls, qwen_api_timeout, artifact_dir, image_path=None,
+):
+    """Run the optional SAM3/Qwen path and adapt it to the legacy bbox result."""
+    from visual_grounding.grounding_agent import (
+        GroundingAgent, GroundingAgentError, GroundingInfrastructureError,
+    )
+    artifact_root = Path(artifact_dir or OUT_DIR) / "sam3_grounding"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    if image_path and Path(image_path).is_file():
+        main_path = str(Path(image_path).resolve())
+    else:
+        main_path = str((artifact_root / "input_main.jpg").resolve())
+        cv2.imwrite(main_path, patch_main_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    agent = GroundingAgent(
+        api_key=api_key, qwen_url=url, model=model,
+        vision_tool_url=vision_tool_url, backend="sam3",
+        timeout=qwen_api_timeout, max_tool_calls=max_tool_calls,
+    )
+    try:
+        agent.preflight()
+        result = agent.locate(
+            destination=str(dest_desc or ""),
+            image_path=main_path,
+            artifact_dir=str(artifact_root),
+        )
+        result.setdefault("grid_5x5", [])
+        result.setdefault("raw", result.copy())
+        result["provider"] = "qwen-tool-agent+sam3"
+        return result
+    except GroundingInfrastructureError as exc:
+        print(f"[WARN][SAM3] service unavailable; falling back to legacy Qwen: {exc}")
+        legacy = qwen_locate_bbox_in_view(
+            dest_desc, patch_main_bgr,
+            api_key=api_key, url=url, model=model,
+            restrict_top_half=True, grounding_backend="legacy",
+        )
+        legacy["sam3_fallback_reason"] = str(exc)
+        return legacy
+    except GroundingAgentError as exc:
+        return {
+            "dest_present": False, "bbox_2d": [0, 0, 0, 0],
+            "confidence": 0.0, "reason": str(exc), "grid_5x5": [],
+            "raw": {"error": str(exc)}, "provider": "qwen-tool-agent+sam3",
+        }
+
+
 def qwen_locate_bbox_in_view(
     dest_desc,
     patch_main_bgr,
@@ -100,8 +153,21 @@ def qwen_locate_bbox_in_view(
     model=QWEN_MODEL,
     timeout=120,
     restrict_top_half=True,
-    prev_grid_5x5=None
+    prev_grid_5x5=None,
+    grounding_backend=GROUNDING_BACKEND,
+    vision_tool_url=VISION_TOOL_URL,
+    max_tool_calls=MAX_TOOL_CALLS,
+    qwen_api_timeout=QWEN_API_TIMEOUT,
+    artifact_dir=None,
+    image_path=None,
 ):
+    if str(grounding_backend or "legacy").lower() == "sam3":
+        return _sam3_locate_bbox_in_view(
+            dest_desc, patch_main_bgr, api_key=api_key, url=url, model=model,
+            vision_tool_url=vision_tool_url, max_tool_calls=max_tool_calls,
+            qwen_api_timeout=qwen_api_timeout, artifact_dir=artifact_dir,
+            image_path=image_path,
+        )
     if restrict_top_half is True:
         focus_text = (
             f"[Task Decomposition / Thought Process]\n"
@@ -407,7 +473,9 @@ def search_and_reach_destination(
     out_dir,
     step_meters=120.0,
     max_steps=3,
-    api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL
+    api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
+    grounding_backend=GROUNDING_BACKEND, vision_tool_url=VISION_TOOL_URL,
+    max_tool_calls=MAX_TOOL_CALLS, qwen_api_timeout=QWEN_API_TIMEOUT,
 ):
     def _haversine_m(lat1, lng1, lat2, lng2):
         R = 6371000.0
@@ -502,7 +570,13 @@ def search_and_reach_destination(
             minimap_bgr=minimap_bgr,
             api_key=api_key, url=url, model=model,
             restrict_top_half=True,
-            prev_grid_5x5=last_grid_5x5
+            prev_grid_5x5=last_grid_5x5,
+            grounding_backend=grounding_backend,
+            vision_tool_url=vision_tool_url,
+            max_tool_calls=max_tool_calls,
+            qwen_api_timeout=qwen_api_timeout,
+            artifact_dir=out_dir,
+            image_path=step_path,
         )
 
         last_grid_5x5 = q.get("grid_5x5") or last_grid_5x5
@@ -641,7 +715,13 @@ def search_and_reach_destination(
                 minimap_bgr=None,
                 api_key=api_key, url=url, model=model,
                 restrict_top_half=False,
-                prev_grid_5x5=last_grid_5x5
+                prev_grid_5x5=last_grid_5x5,
+                grounding_backend=grounding_backend,
+                vision_tool_url=vision_tool_url,
+                max_tool_calls=max_tool_calls,
+                qwen_api_timeout=qwen_api_timeout,
+                artifact_dir=out_dir,
+                image_path=confirm_path,
             )
             steps_log.append({"k": k, "confirm": q_confirm, "pos": pos})
 
@@ -803,7 +883,9 @@ def search_and_reach_destination(
     return found, dest_latlng, predicted_corners_seq, zoom_idx
 
 def hook_after_turn_and_crop(row, ob, instr_id, pos, new_heading, scale_factor, out_dir,
-                             api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL):
+                             api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
+                             grounding_backend=GROUNDING_BACKEND, vision_tool_url=VISION_TOOL_URL,
+                             max_tool_calls=MAX_TOOL_CALLS, qwen_api_timeout=QWEN_API_TIMEOUT):
     dest_desc = (row.get("dest") or "").strip()
     via_desc  = (row.get("via") or "").strip()
     if via_desc.lower() in ("none","null","na","n/a",""):
@@ -823,7 +905,11 @@ def hook_after_turn_and_crop(row, ob, instr_id, pos, new_heading, scale_factor, 
         max_steps=3,
         api_key=api_key,
         url=url,
-        model=model
+        model=model,
+        grounding_backend=grounding_backend,
+        vision_tool_url=vision_tool_url,
+        max_tool_calls=max_tool_calls,
+        qwen_api_timeout=qwen_api_timeout,
     )
 
     if found:
@@ -835,7 +921,11 @@ def hook_after_turn_and_crop(row, ob, instr_id, pos, new_heading, scale_factor, 
 
 def run_turn_and_crop(anno_dir=ANNO_DIR, dataset_dir=DATASET_DIR, split=SPLIT,
                       results_csv=RESULTS_CSV, out_dir=OUT_DIR,
-                      scale_factor=SCALE_FACTOR):
+                      scale_factor=SCALE_FACTOR,
+                      grounding_backend=GROUNDING_BACKEND,
+                      vision_tool_url=VISION_TOOL_URL,
+                      max_tool_calls=MAX_TOOL_CALLS,
+                      qwen_api_timeout=QWEN_API_TIMEOUT):
     try:
         pass
     except Exception as e:
@@ -975,7 +1065,11 @@ def run_turn_and_crop(anno_dir=ANNO_DIR, dataset_dir=DATASET_DIR, split=SPLIT,
                     out_dir=out_dir,
                     api_key=DEFAULT_API_KEY,
                     url=QWEN_URL,
-                    model=QWEN_MODEL
+                    model=QWEN_MODEL,
+                    grounding_backend=grounding_backend,
+                    vision_tool_url=vision_tool_url,
+                    max_tool_calls=max_tool_calls,
+                    qwen_api_timeout=qwen_api_timeout,
                 )
             except Exception as e:
                 print(f"[WARN] search error: {instr_id} -> {e}")
@@ -1167,7 +1261,11 @@ def run_turn_and_crop_full_trajectory(
     anno_dir=ANNO_DIR, dataset_dir=DATASET_DIR, split=SPLIT,
     results_csv=RESULTS_CSV, out_dir=OUT_DIR,
     scale_factor=SCALE_FACTOR,
-    api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL
+    api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
+    grounding_backend=GROUNDING_BACKEND,
+    vision_tool_url=VISION_TOOL_URL,
+    max_tool_calls=MAX_TOOL_CALLS,
+    qwen_api_timeout=QWEN_API_TIMEOUT,
 ):
     try:
         pass
@@ -1347,7 +1445,11 @@ def run_turn_and_crop_full_trajectory(
                     out_dir=out_dir,
                     step_meters=120,
                     max_steps=3,
-                    api_key=api_key, url=url, model=model
+                    api_key=api_key, url=url, model=model,
+                    grounding_backend=grounding_backend,
+                    vision_tool_url=vision_tool_url,
+                    max_tool_calls=max_tool_calls,
+                    qwen_api_timeout=qwen_api_timeout,
                 )
             except Exception as e:
                 print(f"[WARN] search error: {instr_id} step{step_n:02d} -> {e}")
@@ -1479,6 +1581,14 @@ def run_turn_and_crop_full_trajectory(
     return preds, detailed_metrics
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="PSC-AVDN ANDH-Full Search/Confirmation runner")
+    parser.add_argument("--grounding-backend", choices=("legacy", "sam3"), default=GROUNDING_BACKEND)
+    parser.add_argument("--vision-tool-url", default=VISION_TOOL_URL)
+    parser.add_argument("--max-tool-calls", type=int, default=MAX_TOOL_CALLS)
+    parser.add_argument("--qwen-api-timeout", type=float, default=QWEN_API_TIMEOUT)
+    parser.add_argument("--qwen-url", default=QWEN_URL)
+    parser.add_argument("--qwen-model", default=QWEN_MODEL)
+    args = parser.parse_args()
     os.makedirs(OUT_DIR, exist_ok=True)
     run_turn_and_crop_full_trajectory(
         anno_dir=ANNO_DIR,
@@ -1487,5 +1597,9 @@ if __name__ == "__main__":
         results_csv=RESULTS_CSV,
         out_dir=OUT_DIR,
         scale_factor=SCALE_FACTOR,
-        api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL
+        api_key=DEFAULT_API_KEY, url=args.qwen_url, model=args.qwen_model,
+        grounding_backend=args.grounding_backend,
+        vision_tool_url=args.vision_tool_url,
+        max_tool_calls=args.max_tool_calls,
+        qwen_api_timeout=args.qwen_api_timeout,
     )

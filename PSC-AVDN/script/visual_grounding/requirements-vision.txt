@@ -1,0 +1,8 @@
+# Install in a dedicated visual-model environment, not the PSC navigation env.
+numpy>=1.26,<2
+opencv-python-headless==4.10.0.84
+Pillow>=10
+requests>=2.31
+torch>=2.7
+torchvision>=0.22
+
