@@ -36,19 +36,19 @@ from util import (
     data_url_from_image_array
 )
 
-RESULTS_CSV = str(PROJECT_ROOT / "preds_out" / "parsing_results_full.csv")
+RESULTS_CSV = str(PROJECT_ROOT / "out" / "preds_out_baseline_test_unseen_full" / "parsing_results_full.csv")
 
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
-SPLIT       = "val_seen_full"
-PRED_DIR = str(PROJECT_ROOT / "preds" / "andh_full")
+SPLIT       = "test_unseen_full"
+PRED_DIR = str(PROJECT_ROOT / "out" /"preds_baseline_test_unseen_full" / "andh_full")
 OUT_DIR     = os.path.join(PRED_DIR, "search_output")
 SCALE_FACTOR       = 5
 FIXED_CROP_SIDE    = 768
 
 DEFAULT_API_KEY = os.getenv("API_KEY", "")
-QWEN_URL        = os.getenv("QWEN_URL", "")
-QWEN_MODEL      = os.getenv("QWEN_MODEL", "qwen3-vl-plus")
+QWEN_URL        = os.getenv("QWEN_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+QWEN_MODEL      = os.getenv("QWEN_MODEL", "qwen-vl-max")
 GROUNDING_BACKEND = os.getenv("GROUNDING_BACKEND", "legacy").strip().lower()
 VISION_TOOL_URL = os.getenv("VISION_TOOL_URL", "http://127.0.0.1:8765")
 MAX_TOOL_CALLS = int(os.getenv("MAX_TOOL_CALLS", "4"))

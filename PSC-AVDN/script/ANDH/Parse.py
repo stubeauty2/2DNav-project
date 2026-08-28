@@ -20,13 +20,13 @@ sys.path.append(str(PROJECT_ROOT / "src"))
 
 from env import ANDHNavBatch
 
-CFGPU_URL   = ""
-CFGPU_MODEL = ""
+CFGPU_URL   = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+CFGPU_MODEL = "deepseek-v3"
 CFGPU_API_TOKEN = os.getenv("API_TOKEN", "")   
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "AVDN" / "annotations")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
-SPLIT       = "val_seen"
-PRED_DIR = str(PROJECT_ROOT / "preds_out")
+SPLIT       = "test_unseen"
+PRED_DIR = str(PROJECT_ROOT / "out" / "preds_out_baseline_test_unseen")
 SCALE_FACTOR = 3.0
 def generate_view_corners_with_scale(center_point, ob, scale_factor=1.0, angle_deg=None):
     center_point = np.array(center_point, dtype=float).reshape(2,)

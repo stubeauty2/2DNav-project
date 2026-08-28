@@ -20,14 +20,14 @@ from env import ANDHNavBatch
 
 import pandas as pd
 
-CFGPU_URL = ""
-CFGPU_MODEL = ""
+CFGPU_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+CFGPU_MODEL = "deepseek-v3"
 CFGPU_API_TOKEN = os.getenv("API_TOKEN", "")
 
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
 SPLIT = "test_unseen_full"
-PRED_DIR = str(PROJECT_ROOT / "preds_out")
+PRED_DIR = str(PROJECT_ROOT / "out" /"preds_out_baseline_test_unseen_full")
 MAX_STEPS = 8
 SCALE_FACTOR = 3.0
 
@@ -434,7 +434,8 @@ CLOCK_MAP = {
     315: "10:30",
 }
 DEGREE_MARK = re.compile(r"^(\d+)\s*°$")
-CLOCK_MARK  = re.compile(r"^\s*(\d{1,2})(?::\d{1,2})?\s*$", re.I)
+# Keep the minute as a capture group; ``clock_to_angle_deg`` uses group(2).
+CLOCK_MARK  = re.compile(r"^\s*(\d{1,2})(?::(\d{1,2}))?\s*$", re.I)
 
 def degree_to_clock(angle: float) -> str:
     a = float(angle) % 360.0
