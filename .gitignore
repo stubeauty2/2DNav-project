@@ -4,5 +4,5 @@ sam3_outputs/
 
 # Generated outputs, local tests, and dataset files
 out/
-tests/
 datasets/
+tests/

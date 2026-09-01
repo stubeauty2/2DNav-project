@@ -36,12 +36,12 @@ from util import (
     data_url_from_image_array
 )
 
-RESULTS_CSV = str(PROJECT_ROOT / "out" / "preds_out_baseline_test_unseen_full" / "parsing_results_full.csv")
+RESULTS_CSV = str(PROJECT_ROOT / "out" / "preds_out_Parse_test_unseen_full" / "parsing_results_full.csv")
 
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
 SPLIT       = "test_unseen_full"
-PRED_DIR = str(PROJECT_ROOT / "out" /"preds_baseline_test_unseen_full" / "andh_full")
+PRED_DIR = str(PROJECT_ROOT / "out" /"preds_Parse_test_unseen_full" / "andh_full")
 OUT_DIR     = os.path.join(PRED_DIR, "search_output")
 SCALE_FACTOR       = 5
 FIXED_CROP_SIDE    = 768
