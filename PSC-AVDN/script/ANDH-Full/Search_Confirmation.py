@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from env import ANDHNavBatch
 from torch.utils.data import DataLoader
+from category_terms import extract_category_terms
+from visual_grounding.client import VisionToolClient, VisionToolError
 from util import (
     generate_view_corners_with_scale,
     create_view_image,
@@ -36,23 +38,36 @@ from util import (
     data_url_from_image_array
 )
 
-RESULTS_CSV = str(PROJECT_ROOT / "out" / "preds_out_Parse_test_unseen_full" / "parsing_results_full.csv")
+RESULTS_CSV = str(PROJECT_ROOT / "out" / "parse" / "preds_out_Parse_test_unseen_full" / "parsing_results_full.csv")
 
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")
 SPLIT       = "test_unseen_full"
-PRED_DIR = str(PROJECT_ROOT / "out" /"preds_Parse_test_unseen_full" / "andh_full")
-OUT_DIR     = os.path.join(PRED_DIR, "search_output")
+OUT_DIR     = str(PROJECT_ROOT / "out" / "search" / "preds_sam3_test_unseen_full")
 SCALE_FACTOR       = 5
 FIXED_CROP_SIDE    = 768
 
 DEFAULT_API_KEY = os.getenv("API_KEY", "")
 QWEN_URL        = os.getenv("QWEN_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
 QWEN_MODEL      = os.getenv("QWEN_MODEL", "qwen-vl-max")
-GROUNDING_BACKEND = os.getenv("GROUNDING_BACKEND", "legacy").strip().lower()
 VISION_TOOL_URL = os.getenv("VISION_TOOL_URL", "http://127.0.0.1:8765")
-MAX_TOOL_CALLS = int(os.getenv("MAX_TOOL_CALLS", "4"))
-QWEN_API_TIMEOUT = float(os.getenv("QWEN_API_TIMEOUT", "600"))
+SEARCH_QWEN_TIMEOUT = 600
+
+IMAGE5_PROMPT = """
+Image 5 - optional visual segmentation tool evidence:
+Image 5 shows candidate bounding boxes produced by SAM3 from target-category
+keywords on Image 1. It has exactly the same view and pixel coordinates as
+Image 1. These marks are reference evidence only, not ground truth: the tool
+may miss the actual target, produce false positives, or mark other objects of
+the same category that do not satisfy the full destination description.
+Independently inspect Image 1 using the complete destination description and
+Images 2-4 for context. Do not rely exclusively on Image 5 or copy its boxes
+without checking color, shape, structure, texture and spatial relations.
+You may choose a matching target in Image 1 that is NOT marked in Image 5.
+An image with no tool marks does NOT imply that the destination is absent.
+Return exactly one final bbox in Image 1 coordinates, never a bbox for Image 5
+or a tool candidate ID. All original output rules and JSON fields still apply.
+"""
 
 def _haversine_m(lat1, lng1, lat2, lng2):
     R = 6371000.0
@@ -94,52 +109,78 @@ def _patch_xy_to_latlng(u, v, view_corners, ob):
     lat = lat_max - (Y / H_img) * (lat_max - lat_min)
     return [lat, lng]
 
-def _sam3_locate_bbox_in_view(
-    dest_desc, patch_main_bgr, *, api_key, url, model, vision_tool_url,
-    max_tool_calls, qwen_api_timeout, artifact_dir, image_path=None,
+def _sam3_image5(
+    patch_main_bgr, target_terms, *, image_path, artifact_dir,
+    vision_tool_url=VISION_TOOL_URL,
 ):
-    """Run the optional SAM3/Qwen path and adapt it to the legacy bbox result."""
-    from visual_grounding.grounding_agent import (
-        GroundingAgent, GroundingAgentError, GroundingInfrastructureError,
-    )
-    artifact_root = Path(artifact_dir or OUT_DIR) / "sam3_grounding"
+    """Create the experiment's unlabelled SAM3 candidate overlay."""
+    if not image_path or not Path(image_path).is_file():
+        raise VisionToolError(f"main Search image is unavailable: {image_path}")
+
+    artifact_root = Path(artifact_dir)
     artifact_root.mkdir(parents=True, exist_ok=True)
-    if image_path and Path(image_path).is_file():
-        main_path = str(Path(image_path).resolve())
-    else:
-        main_path = str((artifact_root / "input_main.jpg").resolve())
-        cv2.imwrite(main_path, patch_main_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-    agent = GroundingAgent(
-        api_key=api_key, qwen_url=url, model=model,
-        vision_tool_url=vision_tool_url, backend="sam3",
-        timeout=qwen_api_timeout, max_tool_calls=max_tool_calls,
-    )
-    try:
-        agent.preflight()
-        result = agent.locate(
-            destination=str(dest_desc or ""),
-            image_path=main_path,
-            artifact_dir=str(artifact_root),
-        )
-        result.setdefault("grid_5x5", [])
-        result.setdefault("raw", result.copy())
-        result["provider"] = "qwen-tool-agent+sam3"
-        return result
-    except GroundingInfrastructureError as exc:
-        print(f"[WARN][SAM3] service unavailable; falling back to legacy Qwen: {exc}")
-        legacy = qwen_locate_bbox_in_view(
-            dest_desc, patch_main_bgr,
-            api_key=api_key, url=url, model=model,
-            restrict_top_half=True, grounding_backend="legacy",
-        )
-        legacy["sam3_fallback_reason"] = str(exc)
-        return legacy
-    except GroundingAgentError as exc:
-        return {
-            "dest_present": False, "bbox_2d": [0, 0, 0, 0],
-            "confidence": 0.0, "reason": str(exc), "grid_5x5": [],
-            "raw": {"error": str(exc)}, "provider": "qwen-tool-agent+sam3",
-        }
+    concepts = [
+        {"concept_id": f"target-{index + 1}", "text": term, "role": "target"}
+        for index, term in enumerate(target_terms)
+    ]
+    response = VisionToolClient(vision_tool_url, timeout=180.0).candidates({
+        "backend": "sam3",
+        "request_id": Path(image_path).stem,
+        "views": [{
+            "view_id": "main", "role": "main",
+            "image_path": str(Path(image_path).resolve()), "scale": 5,
+        }],
+        "concepts": concepts,
+        # The fixed experiment retained every post-NMS proposal instead of the
+        # service's historical top-12 tool-agent limit.
+        "max_candidates_per_view": 1000000,
+    })
+
+    # Reproduce the experiment's exact-mask NMS across all extracted terms.
+    candidates = []
+    for item in sorted(response.get("candidates") or [], key=lambda value: -float(value.get("score") or 0.0)):
+        mask = cv2.imread(str(item.get("mask_path") or ""), cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            continue
+        mask = mask > 0
+        area = int(mask.sum())
+        if area < 4:
+            continue
+        duplicate = False
+        for kept_item, kept_mask, kept_area in candidates:
+            if min(area, kept_area) / max(area, kept_area) < 0.65:
+                continue
+            intersection = int(np.count_nonzero(mask & kept_mask))
+            if intersection / (area + kept_area - intersection) >= 0.65:
+                duplicate = True
+                break
+        if not duplicate:
+            candidates.append((item, mask, area))
+
+    overlay = patch_main_bgr.copy()
+    candidate_count = 0
+    for item, _mask, _area in candidates:
+        try:
+            x1, y1, x2, y2 = [int(round(float(v))) for v in item["bbox_2d"]]
+        except (KeyError, TypeError, ValueError):
+            continue
+        x1 = max(0, min(overlay.shape[1] - 1, x1))
+        x2 = max(0, min(overlay.shape[1] - 1, x2))
+        y1 = max(0, min(overlay.shape[0] - 1, y1))
+        y2 = max(0, min(overlay.shape[0] - 1, y2))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 255), 3)
+        candidate_count += 1
+
+    image5_path = artifact_root / "image5.png"
+    if not cv2.imwrite(str(image5_path), overlay):
+        raise VisionToolError(f"failed to save SAM3 Image 5: {image5_path}")
+    return overlay, {
+        "target_terms": list(target_terms),
+        "candidate_count": candidate_count,
+        "image5_path": str(image5_path.resolve()),
+    }
 
 
 def qwen_locate_bbox_in_view(
@@ -154,20 +195,8 @@ def qwen_locate_bbox_in_view(
     timeout=120,
     restrict_top_half=True,
     prev_grid_5x5=None,
-    grounding_backend=GROUNDING_BACKEND,
-    vision_tool_url=VISION_TOOL_URL,
-    max_tool_calls=MAX_TOOL_CALLS,
-    qwen_api_timeout=QWEN_API_TIMEOUT,
-    artifact_dir=None,
-    image_path=None,
+    segmentation_image=None,
 ):
-    if str(grounding_backend or "legacy").lower() == "sam3":
-        return _sam3_locate_bbox_in_view(
-            dest_desc, patch_main_bgr, api_key=api_key, url=url, model=model,
-            vision_tool_url=vision_tool_url, max_tool_calls=max_tool_calls,
-            qwen_api_timeout=qwen_api_timeout, artifact_dir=artifact_dir,
-            image_path=image_path,
-        )
     if restrict_top_half is True:
         focus_text = (
             f"[Task Decomposition / Thought Process]\n"
@@ -325,6 +354,9 @@ def qwen_locate_bbox_in_view(
         "}"
     )
 
+    if segmentation_image is not None:
+        system_prompt = system_prompt.replace("up to 4 images", "up to 5 images") + IMAGE5_PROMPT
+
     user_msg = (
         f"Destination description: {dest_desc or '(None)'}\n"
         f"All coordinates MUST be in Image 1's {FIXED_CROP_SIDE}x{FIXED_CROP_SIDE} pixel grid.\n"
@@ -360,6 +392,12 @@ def qwen_locate_bbox_in_view(
         content.append({
             "type": "image_url",
             "image_url": {"url": data_url_from_image_array(minimap_bgr)}
+        })
+
+    if segmentation_image is not None:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": data_url_from_image_array(segmentation_image)}
         })
 
     headers = {
@@ -474,8 +512,7 @@ def search_and_reach_destination(
     step_meters=120.0,
     max_steps=3,
     api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
-    grounding_backend=GROUNDING_BACKEND, vision_tool_url=VISION_TOOL_URL,
-    max_tool_calls=MAX_TOOL_CALLS, qwen_api_timeout=QWEN_API_TIMEOUT,
+    target_terms=None, vision_tool_url=VISION_TOOL_URL,
 ):
     def _haversine_m(lat1, lng1, lat2, lng2):
         R = 6371000.0
@@ -562,6 +599,18 @@ def search_and_reach_destination(
             pad_m=40.0
         )
 
+        segmentation_image = None
+        sam3_meta = None
+        try:
+            terms = list(target_terms or extract_category_terms(dest_desc))
+            sam3_dir = os.path.join(out_dir, "sam3_image5", f"{instr_id}_step{step_n:02d}")
+            segmentation_image, sam3_meta = _sam3_image5(
+                patch_k, terms, image_path=step_path,
+                artifact_dir=sam3_dir, vision_tool_url=vision_tool_url,
+            )
+        except Exception as exc:
+            print(f"[WARN][SAM3] Image 5 unavailable for {instr_id} step{step_n:02d}; using four-image Search: {exc}")
+
         q = qwen_locate_bbox_in_view(
             dest_desc,
             patch_main_bgr=patch_k,
@@ -569,15 +618,13 @@ def search_and_reach_destination(
             patch_s8_bgr=patch_k_s8,
             minimap_bgr=minimap_bgr,
             api_key=api_key, url=url, model=model,
+            timeout=SEARCH_QWEN_TIMEOUT,
             restrict_top_half=True,
             prev_grid_5x5=last_grid_5x5,
-            grounding_backend=grounding_backend,
-            vision_tool_url=vision_tool_url,
-            max_tool_calls=max_tool_calls,
-            qwen_api_timeout=qwen_api_timeout,
-            artifact_dir=out_dir,
-            image_path=step_path,
+            segmentation_image=segmentation_image,
         )
+        if sam3_meta is not None:
+            q["sam3_image5"] = sam3_meta
 
         last_grid_5x5 = q.get("grid_5x5") or last_grid_5x5
 
@@ -713,15 +760,9 @@ def search_and_reach_destination(
                 patch_s4_bgr=patch_confirm_s4,
                 patch_s8_bgr=patch_confirm_s8,
                 minimap_bgr=None,
-                api_key=api_key, url=url, model=model,
-                restrict_top_half=False,
-                prev_grid_5x5=last_grid_5x5,
-                grounding_backend=grounding_backend,
-                vision_tool_url=vision_tool_url,
-                max_tool_calls=max_tool_calls,
-                qwen_api_timeout=qwen_api_timeout,
-                artifact_dir=out_dir,
-                image_path=confirm_path,
+            api_key=api_key, url=url, model=model,
+            restrict_top_half=False,
+            prev_grid_5x5=last_grid_5x5,
             )
             steps_log.append({"k": k, "confirm": q_confirm, "pos": pos})
 
@@ -884,8 +925,7 @@ def search_and_reach_destination(
 
 def hook_after_turn_and_crop(row, ob, instr_id, pos, new_heading, scale_factor, out_dir,
                              api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
-                             grounding_backend=GROUNDING_BACKEND, vision_tool_url=VISION_TOOL_URL,
-                             max_tool_calls=MAX_TOOL_CALLS, qwen_api_timeout=QWEN_API_TIMEOUT):
+                             vision_tool_url=VISION_TOOL_URL):
     dest_desc = (row.get("dest") or "").strip()
     via_desc  = (row.get("via") or "").strip()
     if via_desc.lower() in ("none","null","na","n/a",""):
@@ -906,10 +946,8 @@ def hook_after_turn_and_crop(row, ob, instr_id, pos, new_heading, scale_factor, 
         api_key=api_key,
         url=url,
         model=model,
-        grounding_backend=grounding_backend,
         vision_tool_url=vision_tool_url,
-        max_tool_calls=max_tool_calls,
-        qwen_api_timeout=qwen_api_timeout,
+        target_terms=extract_category_terms(dest_desc),
     )
 
     if found:
@@ -922,10 +960,8 @@ def hook_after_turn_and_crop(row, ob, instr_id, pos, new_heading, scale_factor, 
 def run_turn_and_crop(anno_dir=ANNO_DIR, dataset_dir=DATASET_DIR, split=SPLIT,
                       results_csv=RESULTS_CSV, out_dir=OUT_DIR,
                       scale_factor=SCALE_FACTOR,
-                      grounding_backend=GROUNDING_BACKEND,
                       vision_tool_url=VISION_TOOL_URL,
-                      max_tool_calls=MAX_TOOL_CALLS,
-                      qwen_api_timeout=QWEN_API_TIMEOUT):
+                      ):
     try:
         pass
     except Exception as e:
@@ -1066,10 +1102,7 @@ def run_turn_and_crop(anno_dir=ANNO_DIR, dataset_dir=DATASET_DIR, split=SPLIT,
                     api_key=DEFAULT_API_KEY,
                     url=QWEN_URL,
                     model=QWEN_MODEL,
-                    grounding_backend=grounding_backend,
                     vision_tool_url=vision_tool_url,
-                    max_tool_calls=max_tool_calls,
-                    qwen_api_timeout=qwen_api_timeout,
                 )
             except Exception as e:
                 print(f"[WARN] search error: {instr_id} -> {e}")
@@ -1262,10 +1295,7 @@ def run_turn_and_crop_full_trajectory(
     results_csv=RESULTS_CSV, out_dir=OUT_DIR,
     scale_factor=SCALE_FACTOR,
     api_key=DEFAULT_API_KEY, url=QWEN_URL, model=QWEN_MODEL,
-    grounding_backend=GROUNDING_BACKEND,
     vision_tool_url=VISION_TOOL_URL,
-    max_tool_calls=MAX_TOOL_CALLS,
-    qwen_api_timeout=QWEN_API_TIMEOUT,
 ):
     try:
         pass
@@ -1446,10 +1476,8 @@ def run_turn_and_crop_full_trajectory(
                     step_meters=120,
                     max_steps=3,
                     api_key=api_key, url=url, model=model,
-                    grounding_backend=grounding_backend,
                     vision_tool_url=vision_tool_url,
-                    max_tool_calls=max_tool_calls,
-                    qwen_api_timeout=qwen_api_timeout,
+                    target_terms=extract_category_terms(dest_desc),
                 )
             except Exception as e:
                 print(f"[WARN] search error: {instr_id} step{step_n:02d} -> {e}")
@@ -1533,6 +1561,13 @@ def run_turn_and_crop_full_trajectory(
 
         processed += 1
 
+        # Keep a recoverable, incrementally updated snapshot for long full runs.
+        progress_file = os.path.join(out_dir, "turn_and_crop_eval_results_full_traj.in_progress.json")
+        with open(progress_file, "w", encoding="utf-8") as f:
+            json.dump({"predictions": preds, "processed": processed, "skipped": skipped}, f,
+                      ensure_ascii=False, indent=2,
+                      default=lambda value: value.tolist() if hasattr(value, "tolist") else str(value))
+
     print(f"\nFull-trajectory done: generated {processed} entries; skipped {skipped} entries. Output dir: {out_dir}")
 
     if _metrics_acc["final_iou"]:
@@ -1582,10 +1617,7 @@ def run_turn_and_crop_full_trajectory(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PSC-AVDN ANDH-Full Search/Confirmation runner")
-    parser.add_argument("--grounding-backend", choices=("legacy", "sam3"), default=GROUNDING_BACKEND)
     parser.add_argument("--vision-tool-url", default=VISION_TOOL_URL)
-    parser.add_argument("--max-tool-calls", type=int, default=MAX_TOOL_CALLS)
-    parser.add_argument("--qwen-api-timeout", type=float, default=QWEN_API_TIMEOUT)
     parser.add_argument("--qwen-url", default=QWEN_URL)
     parser.add_argument("--qwen-model", default=QWEN_MODEL)
     args = parser.parse_args()
@@ -1598,8 +1630,5 @@ if __name__ == "__main__":
         out_dir=OUT_DIR,
         scale_factor=SCALE_FACTOR,
         api_key=DEFAULT_API_KEY, url=args.qwen_url, model=args.qwen_model,
-        grounding_backend=args.grounding_backend,
         vision_tool_url=args.vision_tool_url,
-        max_tool_calls=args.max_tool_calls,
-        qwen_api_timeout=args.qwen_api_timeout,
     )
