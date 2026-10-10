@@ -6,3 +6,10 @@ sam3_outputs/
 out/
 datasets/
 tests/
+tmp/
+
+# Keep regression checks for both navigation implementations.
+!/tests/
+/tests/*
+!/tests/andn_core/
+!/tests/andh_core/
