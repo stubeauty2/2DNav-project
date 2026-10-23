@@ -186,7 +186,7 @@ class Recording(unittest.TestCase):
     def test_manifest_snapshot_hashes_match_sources(self):
         token=audit._run.set(self.recorder)
         try:
-            audit._start_run({'results_csv':str(ROOT/'out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'),
+            audit._start_run({'results_csv':str(ROOT/'out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'),
                               'anno_dir':str(ROOT/'datasets/sample2'),'split':'test_unseen_full'})
         finally:
             audit._run.reset(token)

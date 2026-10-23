@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
 REF='57b9ecb31c2b64967d6dea9aaebdbce92c8f02a8'
-BASE=ROOT/'out/search/preds_sam3_test_unseen_full'
+BASE=ROOT/'out/02_sam3/search/preds_sam3_test_unseen_full'
 OUT=ROOT/'out/sam3_core_restructure_20261006'
 sys.path[:0]=[str(ROOT/'PSC-AVDN/script'),str(ROOT/'src')]
 
@@ -82,7 +82,7 @@ def main():
     rescue_stub=patch.object(nav,'rescue_failed_stage',return_value=(False,None,[],None,dict(status='replay_no_selection',committed=False))) if args.spatial_mode=='g5' else nullcontext()
     with patch.object(runner,'search_and_reach_destination',search),patch.object(nav,'_sam3_image5',image5),patch.object(runner,'decide_turn_from_land',land),patch('requests.post',post),patch('requests.sessions.Session.request',side_effect=AssertionError('Network forbidden')),rescue_stub:
         options={'trace':args.trace,'spatial_mode':args.spatial_mode} if args.version=='after' else {}
-        runner.run_turn_and_crop_full_trajectory(anno_dir=str(ROOT/'datasets/sample2'),dataset_dir=str(ROOT/'datasets/sample2'),split='test_unseen_full',results_csv=str(ROOT/'out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'),out_dir=str(dest),api_key='',url='offline://recorded-model',model='qwen-vl-max',vision_tool_url='offline://recorded-sam3',**options)
+        runner.run_turn_and_crop_full_trajectory(anno_dir=str(ROOT/'datasets/sample2'),dataset_dir=str(ROOT/'datasets/sample2'),split='test_unseen_full',results_csv=str(ROOT/'out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'),out_dir=str(dest),api_key='',url='offline://recorded-model',model='qwen-vl-max',vision_tool_url='offline://recorded-sam3',**options)
     result=load(dest/'turn_and_crop_eval_results_full_traj.json');reference=load(BASE/'turn_and_crop_eval_results_full_traj.json')['predictions']
     assert len(result['predictions'])==20
     differences={iid:abs(p['final_iou']-reference[iid]['final_iou']) for iid,p in result['predictions'].items()}

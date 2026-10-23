@@ -12,9 +12,9 @@ import time
 from datetime import datetime, timezone, timedelta
 
 ROOT = Path(__file__).resolve().parents[2]
-BASE = ROOT / 'out/search/preds_sam3_test_unseen_full/turn_and_crop_eval_results_full_traj.json'
+BASE = ROOT / 'out/02_sam3/search/preds_sam3_test_unseen_full/turn_and_crop_eval_results_full_traj.json'
 SAMPLE = ROOT / 'datasets/sample2'
-PARSE = ROOT / 'out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'
+PARSE = ROOT / 'out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'
 
 
 def read(path):

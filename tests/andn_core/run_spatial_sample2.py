@@ -47,7 +47,7 @@ def main():
     manifest=dict(started_at=datetime.now(timezone.utc).isoformat(),modes=args.modes,source_sha256=sources(),
         candidate_count=0 if is_g5 else 2,confirmation_review=args.confirmation_review,
         search_prompt='Original SAM3 primary; approved G4 only after found=false' if is_g5 else 'original C1 plus approved spatial additions; S1 not enabled',
-        parse_csv='out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv',
+        parse_csv='out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv',
         annotation_sha256=hashlib.sha256((ROOT/'datasets/sample2/test_unseen_full_data.json').read_bytes()).hexdigest(),
         model=QWEN_MODEL,sam3=health,comparison='Historical SAM3 plus same-run primary SAM3 counterfactual' if is_g5 else 'Historical SAM3 20 matching trajectories, plus contemporary C1 off control',
         budget='G5: primary max3 rounds; one extra G4 Search and at most one C1 Confirmation per failed stage; max2 rescue candidates' if is_g5 else 'max 3 rounds/stage; max 2 candidates/round; SAM3 on actual-position main only',

@@ -33,7 +33,7 @@ from util import (
     _move_forward_geo,
 )
 
-RESULTS_CSV = str(PROJECT_ROOT / "out" / "parse" / "preds_out_Parse_test_unseen_full" / "parsing_results_full.csv")
+RESULTS_CSV = str(PROJECT_ROOT / "out" / "01_parse_only" / "parse" / "preds_out_Parse_test_unseen_full" / "parsing_results_full.csv")
 
 ANNO_DIR = str(PROJECT_ROOT / "datasets" / "FULL")
 DATASET_DIR = str(PROJECT_ROOT / "datasets" / "AVDN")

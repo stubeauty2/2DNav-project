@@ -1,0 +1,5 @@
+numpy
+Pillow
+requests
+jsonschema
+shapely>=2

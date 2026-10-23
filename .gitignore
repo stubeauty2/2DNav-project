@@ -9,7 +9,9 @@ tests/
 tmp/
 
 # Keep regression checks for both navigation implementations.
-!/tests/
-/tests/*
-!/tests/andn_core/
-!/tests/andh_core/
+# !/tests/
+# /tests/*
+# !/tests/andn_core/
+# !/tests/andh_core/
+# !/tests/avdn_mllm_capacity20/
+# !/tests/grounding_mechanism20/

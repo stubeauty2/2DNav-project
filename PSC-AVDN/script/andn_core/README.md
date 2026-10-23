@@ -70,7 +70,7 @@ conda run --no-capture-output -n sam3 python -m andn_core.tools.grounding.servic
 conda run --no-capture-output -n 2DNav python -B PSC-AVDN/script/andn_core/runner.py `
   --anno-dir datasets/sample2 `
   --dataset-dir datasets/sample2 `
-  --results-csv out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv `
+  --results-csv out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv `
   --out-dir out/andn_core/sample2_sam3 `
   --vision-tool-url http://127.0.0.1:8765
 ```

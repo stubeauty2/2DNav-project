@@ -1,5 +1,24 @@
 # 2DNav-project
 
+## 当前在线 Agent（2026-10-23）
+
+当前工作目录对应 [第 06 阶段：harness 重构版](out/06_harness_refactor/README.md)，已从 Jev 复核实验回退至加入 Jev 之前；AVDN/CityNav 的 32 个 Python 文件与 `tests/refactor_online_compare/runtime_after` 一致。第 07 阶段已归档，第 08 阶段是尚未实现的 Jev 搜索证据工具设计。
+
+[01–08 实验输出总索引](out/README.md) · [当前代码身份与哈希](out/current_code_version.json) · [下一版设计](out/08_jev_evidence_design/jev_evidence_design_20261023/plan.md)
+
+本次代码快照包含当前在线包、`tests/nav_offline` 离线工具及配套回归测试。`out/`、数据集、权重和服务环境仅保存在本地；上面的实验报告链接需要本地归档。入口测试中的两项历史一致性检查还依赖 `out/agent_refactor_20261021/before_refactor.zip`。
+
+旧 Jev 复核代码保存在本地分支 `codex/jev-review-archive-20261023`（提交 `b100fa589b77a1298a7077b94f26f3e343552154`），完整源码压缩包为 `out/07_jev_review/jev_review_archive_20261023/jev_review_code.zip`。恢复旧版时使用独立工作目录，避免覆盖当前版本。
+
+AVDN 和 CityNav 各自使用 `run.py → analysis.py → loop.py`；全部系统提示位于各自 `prompts.py`，执行能力位于 `tools/`。
+
+- [AVDN 入口与输入说明](AVDN/README.md)
+- [CityNav 入口与输入说明](CityNav/README.md)
+- [离线准备与评测](tests/nav_offline/README.md)
+- [重构与源码说明](out/agent_refactor_20261021/index.html)
+
+历史实验保留在 `out/`，近期冻结运行时保留在各自 `tests/` 实验目录。下面是旧基线的历史说明，不作为当前 AVDN/CityNav 入口。
+
 ## Version status: preliminary harness exploration (2026-10-10)
 
 This version records an initial exploration of a navigation harness. It does
@@ -48,7 +67,7 @@ and fallback policy. The default output is isolated under `out/andn_core/`.
 ```powershell
 conda run --no-capture-output -n 2DNav python PSC-AVDN/script/andn_core/runner.py `
   --anno-dir datasets/sample2 --dataset-dir datasets/sample2 `
-  --results-csv out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv `
+  --results-csv out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv `
   --out-dir out/andn_core/sample2_sam3
 ```
 

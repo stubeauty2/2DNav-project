@@ -9,8 +9,8 @@ from run_spatial_sample2 import sources,write
 def preflight(out):
     from andn_core.tools.termination import stop_only_instruction
     anno=ROOT/'datasets/FULL/test_unseen_full_data.json'
-    parse=ROOT/'out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'
-    baseline=ROOT/'out/search/preds_sam3_test_unseen_full/turn_and_crop_eval_results_full_traj.json'
+    parse=ROOT/'out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'
+    baseline=ROOT/'out/02_sam3/search/preds_sam3_test_unseen_full/turn_and_crop_eval_results_full_traj.json'
     annotations=json.loads(anno.read_text(encoding='utf8'))
     ids=[str(a['map_name'])+'__'+str(a['route_index']) for a in annotations]
     assert len(ids)==len(set(ids))==432
@@ -70,7 +70,7 @@ def main():
     write(out/'manifest.json',manifest);write(out/'status.json',dict(status='running',pid=os.getpid()))
     try:
         runner.run_turn_and_crop_full_trajectory(anno_dir=str(ROOT/'datasets/FULL'),dataset_dir=str(ROOT/'datasets/AVDN'),
-            split='test_unseen_full',results_csv=str(ROOT/'out/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'),
+            split='test_unseen_full',results_csv=str(ROOT/'out/01_parse_only/parse/preds_out_Parse_test_unseen_full/parsing_results_full.csv'),
             out_dir=str(out/'g5'),api_key=key,url=QWEN_URL,model=QWEN_MODEL,vision_tool_url=service,
             candidate_count=0,confirmation_review='off',spatial_mode='g5',trace=True)
         predictions=json.loads((out/'g5/turn_and_crop_eval_results_full_traj.json').read_text(encoding='utf8'))['predictions']
