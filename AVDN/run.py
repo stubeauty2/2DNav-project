@@ -19,7 +19,8 @@ from . import analysis
 from .loop import Agent, public_episode
 from .tools.views import Environment
 from .tools.model import Model, Halt
-from .tools.grounding import SAM3, GroundingDINO, LocateAnything
+from .tools.grounding_tools import SAM3, GroundingDINO, LocateAnything
+from .tools.jev_evidence import JevEvidence
 from .tools.runtime import read_jsonl, write_jsonl, save_json, load_json, runtime_hash, digest
 from .config import (MODEL, API_URL, MAX_ROUNDS, MAX_TOOLS_PER_ROUND, MAX_REQUESTS,
                      SAM3_URL, DINO_URL, LOCATE_ANYTHING_URL)
@@ -48,7 +49,9 @@ def run_episode(entry, directory, *, key, model=MODEL, analysis_model=None, url=
                 thinking_budget=0, direction_mode='staged', analysis_only=False,
                 max_rounds=MAX_ROUNDS, max_tools=MAX_TOOLS_PER_ROUND, max_requests=MAX_REQUESTS,
                 sam3_url=SAM3_URL, dino_url=DINO_URL, locate_anything_url=LOCATE_ANYTHING_URL,
-                observation_grounder=None, observation_query_mode='full'):
+                observation_grounder=None, observation_query_mode='full',
+                jev_url=None, jev_max_questions=24, jev_model='OneJev1.6-4B', tool_protocol='structured_v2',
+                grounding_mode='adaptive', max_observation_tools=8, visual_model=None, skill_backends=None):
     """Public-data orchestration API; Model/analysis can be replaced in tests."""
     validate_input(entry)
     episode = copy.deepcopy(entry)
@@ -69,11 +72,16 @@ def run_episode(entry, directory, *, key, model=MODEL, analysis_model=None, url=
             return dict(episode_id=episode['episode_id'], status='analyzed',
                         initialization=episode['initialization'])
         llm = Model(directory/'requests', model, key, url=url, max_requests=max_requests,
-                    enable_thinking=thinking_budget>0, thinking_budget=thinking_budget)
+                    enable_thinking=thinking_budget>0, thinking_budget=thinking_budget, tool_protocol=tool_protocol, visual_model=visual_model)
+        grounders=dict(dino=GroundingDINO(dino_url))
+        if grounding_mode in ('direct','adaptive'):
+            grounders['locate_anything']=LocateAnything(locate_anything_url)
         return Agent(episode, env, llm, SAM3(sam3_url), directory,
             max_rounds=max_rounds, max_tools=max_tools,
-            grounders=dict(dino=GroundingDINO(dino_url),locate_anything=LocateAnything(locate_anything_url)),
-            observation_grounder=observation_grounder,observation_query_mode=observation_query_mode).run()
+            grounding_mode=grounding_mode,max_observation_tools=max_observation_tools,skill_backends=skill_backends,
+            grounders=grounders,
+            observation_grounder=observation_grounder,observation_query_mode=observation_query_mode,
+            jev=JevEvidence(jev_url,model=jev_model,max_questions=jev_max_questions) if jev_url else None).run()
     finally:
         env.close()
 
@@ -92,13 +100,21 @@ def main(argv=None):
     parser.add_argument('--max-rounds',type=int,default=MAX_ROUNDS)
     parser.add_argument('--max-tools',type=int,default=MAX_TOOLS_PER_ROUND)
     parser.add_argument('--max-requests',type=int,default=MAX_REQUESTS)
+    parser.add_argument('--grounding-mode',choices=['adaptive','skill','direct'],default='adaptive')
+    parser.add_argument('--visual-model',help='Optional VLM evidence tool; decision/review/fusion keep --model')
+    parser.add_argument('--skill-backends',nargs='+',choices=['dino','sam3','locate_anything'],help='Default skill sources; raw tools remain independent')
+    parser.add_argument('--max-observation-tools',type=int,default=8)
+    parser.add_argument('--tool-protocol',choices=['legacy','structured_v1','structured_v2'],default='structured_v2')
+    parser.add_argument('--jev-url',help='Enable optional Jev visual evidence; review remains MLLM')
+    parser.add_argument('--jev-max-questions',type=int,default=24)
+    parser.add_argument('--jev-model',default='OneJev1.6-4B',help='Expected model identity returned by the evidence service')
     parser.add_argument('--sam3-url',default=SAM3_URL)
     parser.add_argument('--dino-url',default=DINO_URL)
-    parser.add_argument('--locate-anything-url',default=LOCATE_ANYTHING_URL)
+    parser.add_argument('--locate-anything-url',default=LOCATE_ANYTHING_URL,help='Independent raw grounder in adaptive/direct modes; ignored in legacy skill mode')
     parser.add_argument('--observation-grounder',choices=['sam3','dino','locate_anything'])
     parser.add_argument('--observation-query-mode',choices=['full','category'],default='full')
     args = parser.parse_args(argv)
-    if args.limit<0 or args.thinking_budget<0 or args.max_tools<0 or min(args.max_rounds,args.max_requests)<=0:
+    if args.limit<0 or args.thinking_budget<0 or args.max_tools<0 or args.max_observation_tools<=0 or min(args.max_rounds,args.max_requests,args.jev_max_questions)<=0:
         parser.error('Limits must be nonnegative; rounds and requests must be positive')
     folder = Path(args.root)/DATASET.lower()
     source = Path(args.inputs) if args.inputs else folder/'episodes.jsonl'

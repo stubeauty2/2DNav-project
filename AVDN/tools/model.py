@@ -111,7 +111,8 @@ def model_context(value):
             # Preserve every validated proposal. Omit transport duplicates and local
             # artifacts; the unmodified service response remains in the tool journal.
             value={k:v for k,v in value.items() if k in (
-                'backend','status','candidates','error','note','rejected_candidates')}
+                'backend','status','candidates','error','note','rejected_candidates','query','view_id',
+                'sources','unresolved','unassessed_sources','attribution_issues','fusion_requests','skill_version','evidence_id','cache_hit')}
         return {k:model_context(v) for k,v in value.items()
                 if k not in ('bbox_pixels','pixel_to_world','world_to_raster','mask_path')}
     if isinstance(value,list):return [model_context(v) for v in value]
@@ -123,9 +124,12 @@ def safe_view(view):
 
 class Model:
     def __init__(self, directory, model, key, max_requests=MAX_REQUESTS, url=DEFAULT_URL,
-                 enable_thinking=ENABLE_THINKING, thinking_budget=1024):
+                 enable_thinking=ENABLE_THINKING, thinking_budget=1024, tool_protocol='legacy', visual_model=None):
         self.directory=Path(directory)
         self.directory.mkdir(parents=True,exist_ok=True)
+        if tool_protocol not in ('legacy','structured_v1','structured_v2'):raise ValueError('Unknown tool protocol')
+        self.tool_protocol=tool_protocol
+        self.visual_model=visual_model
         self.model,self.key,self.url=model,key,url
         self.max_requests=max_requests
         self.enable_thinking=bool(enable_thinking)
@@ -143,11 +147,73 @@ class Model:
             # Preserve full navigation memory in traces/decisions; review the current
             # object without anchoring on earlier guesses about different candidates.
             safe['memory']={'confirmed_auxiliary':safe.get('memory',{}).get('confirmed_auxiliary',[])}
+            if context.get('grounding_mode') in ('skill','adaptive'):
+                history=safe.pop('history',{})
+                safe['review_evidence']=dict(
+                    current_observation=history.get('current_observation'),
+                    previous_review=history.get('latest_review'),
+                    note='Previous review is a fallible claim; independently verify the current candidate from RGB.')
+                if context.get('grounding_mode')=='adaptive':
+                    # Old rejection prose can be copied onto a different candidate.
+                    # Recovery uses it in decision context; independent review does not.
+                    safe['review_evidence'].pop('previous_review',None)
+                    safe['review_evidence']['note']='Inspect this marked candidate independently. Tool observations are fallible and may concern other regions; only facts bound to this candidate support its identity.'
+        skill_decision=context.get('mode')=='decision' and context.get('grounding_mode')=='skill'
+        adaptive=context.get('grounding_mode')=='adaptive'
         system=REVIEW_SYSTEM if context.get('mode')=='review' else SYSTEM
+        if adaptive and context.get('mode')=='review':
+            from .adaptive_policy import REVIEW_IDENTITY
+            system += REVIEW_IDENTITY
+        if skill_decision:
+            from ..prompts import SKILL_SYSTEM
+            system=SKILL_SYSTEM
+        if context.get('mode')=='decision' and context.get('grounding_mode')=='adaptive':
+            from .adaptive_policy import DECISION_SYSTEM
+            system=DECISION_SYSTEM
+            if context.get('evidence_focus'):
+                from .adaptive_policy import RECOVERY_SYSTEM
+                system=RECOVERY_SYSTEM
+        request_model=self.model
+        output_tokens=MAX_OUTPUT_TOKENS
+        if context.get('mode')=='visual_evidence':
+            if not self.visual_model:raise ValueError('Visual evidence model is disabled')
+            from .visual_evidence import SYSTEM as VISUAL_SYSTEM
+            system=VISUAL_SYSTEM
+            request_model=self.visual_model
+            output_tokens=4096
+        if context.get('mode')=='grounding_fusion':
+            from .grounding_skill import FUSION_SYSTEM
+            system=FUSION_SYSTEM
+            output_tokens=6144
+        if not adaptive and context.get('mode')=='decision' and 'jev' in context.get('available_evidence_tools',[]):
+            from ..prompts import JEV_TOOL_SYSTEM
+            system += JEV_TOOL_SYSTEM
+        if not adaptive and context.get('mode')=='decision' and self.tool_protocol in ('structured_v1','structured_v2'):
+            from .memory import presentation
+            from ..prompts import TOOL_SYSTEM
+            if skill_decision:
+                from ..prompts import SKILL_TOOL_SYSTEM as TOOL_SYSTEM
+            if self.tool_protocol=='structured_v2':
+                from .memory import presentation_v2
+                from ..prompts import TOOL_SYSTEM_V2
+                if skill_decision:
+                    from ..prompts import SKILL_TOOL_SYSTEM_V2 as TOOL_SYSTEM_V2
+                safe=presentation_v2(safe)
+                system += TOOL_SYSTEM + TOOL_SYSTEM_V2
+            else:
+                safe=presentation(safe)
+                system += TOOL_SYSTEM
+        if context.get('mode')=='decision' and context.get('grounding_mode')=='skill':
+            from .grounding_skill import DECISION_SYSTEM
+            system += DECISION_SYSTEM
+        if adaptive and context.get('mode') in ('decision','review'):
+            from .memory import presentation_adaptive
+            safe=presentation_adaptive(safe)
+        request_format='labelled-views-v7-adaptive' if adaptive else 'labelled-views-v6-json-object'
         assets=[dict(view_id=v['view_id'],image_path=v['image_path'],
                      sha256=hashlib.sha256(Path(v['image_path']).read_bytes()).hexdigest()) for v in views]
-        signature=digest(dict(system=system,context=safe,assets=assets,model=self.model,endpoint=self.url,
-            request_format='labelled-views-v6-json-object',temperature=0,
+        signature=digest(dict(system=system,context=safe,assets=assets,model=request_model,endpoint=self.url,
+            request_format=request_format,temperature=0,max_output_tokens=output_tokens,
             enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,response_format={'type':'json_object'}))
         path=self.directory/f'{self.cursor:03d}.json'
         self.cursor+=1
@@ -176,17 +242,39 @@ class Model:
             content.append(dict(type='text',text='The NEXT image is '+json.dumps(label)))
             content.append(dict(type='image_url',image_url=dict(url='data:image/png;base64,'+
                 base64.b64encode(Path(view['image_path']).read_bytes()).decode())))
+        if adaptive and context.get('mode')=='decision':
+            review=safe.get('history',{}).get('latest_review')
+            focus=dict(latest_feedback=safe.get('latest_feedback',[]),
+                requested_destination=safe.get('initialization',{}).get('final_target'),
+                target_note='Fallible initialization; verify the requested noun/group against instruction_raw. Do not substitute its reference object.',
+                evidence_focus=safe.get('evidence_focus'),
+                latest_review=review,
+                tools_callable_now=safe.get('tools_callable_now',[]),
+                skills_callable_now=safe.get('skills_callable_now',[]),
+                optional_tools_remaining=safe.get('optional_tools_remaining'),
+                model_requests_remaining=safe.get('model_requests_remaining'))
+            content.append(dict(type='text',text='CURRENT execution state: '+json.dumps(focus,ensure_ascii=False)+
+                '\nReturn the next valid action. Address the latest error/review conflict; do not repeat a rejected action unchanged.'))
+        if adaptive and context.get('mode')=='review':
+            task=dict(instruction_raw=safe.get('instruction_raw'),
+                requested_destination=safe.get('initialization',{}).get('final_target'),
+                proposal_target=safe.get('candidate',{}).get('target'),
+                proposal_source_view=safe.get('candidate',{}).get('view_id'),
+                proposal_source_bbox=safe.get('candidate',{}).get('bbox'),
+                projection_in_review=safe.get('candidate',{}).get('projection_in_review'))
+            content.append(dict(type='text',text='INDEPENDENT IDENTITY CHECK: '+json.dumps(task,ensure_ascii=False)+
+                '\nFirst name the requested object/group in reason. Check that the marked proposal is that object, not merely its reference. Verify the full instruction; initialization and tool opinions are fallible.'))
         messages=[dict(role='system',content=system),dict(role='user',content=content)]
-        record=dict(signature=signature,status='pending',model=self.model,
+        record=dict(signature=signature,status='pending',model=request_model,
                     system_prompt=system,
                     enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
-                    max_tokens=MAX_OUTPUT_TOKENS,temperature=0,
+                    max_tokens=output_tokens,temperature=0,
                     response_format={'type':'json_object'},
-                    request_format='labelled-views-v6-json-object',context=safe,assets=assets)
+                    request_format=request_format,context=safe,assets=assets)
         save_json(path,record)  # Persist before sending; never auto reissue an uncertain request.
         try:
-            response=call_model(self.url,self.model,self.key,messages,timeout=90,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
-                max_tokens=MAX_OUTPUT_TOKENS,temperature=0,response_format={'type':'json_object'})
+            response=call_model(self.url,request_model,self.key,messages,timeout=90,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
+                max_tokens=output_tokens,temperature=0,response_format={'type':'json_object'})
             record.update(response=response,status='ok' if response['status']==200 else 'api_error')
         except Exception as exc:
             # Preserve failures in the journal; do not automatically repeat uncertain calls.
@@ -200,7 +288,8 @@ def parse_action(text):
     text=text.strip()
     if text.startswith('```') and text.endswith('```'):
         text=text.split('\n',1)[1].rsplit('```',1)[0].strip()
-    obj=json.loads(text)
+    from .jev_evidence import normalize_action
+    obj=normalize_action(json.loads(text))
     if not isinstance(obj,dict) or not isinstance(obj.get('reason'),str) or not obj['reason'].strip():
         raise ValueError('Return one JSON action with a nonempty reason')
     if len(obj['reason'])>2000:

@@ -28,7 +28,7 @@ class AgentTests(unittest.TestCase):
     def tearDown(self):self.temp.cleanup()
     def modules(self,d):
         names = dict(engine='loop', environment='tools.views', geometry='tools.geometry',
-                     model='tools.model', contracts='loop', tools='tools.grounding', io='tools.runtime')
+                     model='tools.model', contracts='loop', tools='tools.grounding_skill', io='tools.runtime')
         modules = {n:importlib.import_module(d+'.'+target) for n,target in names.items()}
         modules['evaluate'] = importlib.import_module('nav_offline.'+d.lower()+'.evaluate')
         return modules
@@ -47,7 +47,7 @@ class AgentTests(unittest.TestCase):
     def test_candidate_public_geometry_uses_candidate_not_agent(self):
         for d in ('AVDN','CityNav'):
             m=self.modules(d);ep,env,out=self.fixture(d,m)
-            context=importlib.import_module(d+'.tools.context').candidate_context
+            context=importlib.import_module(d+'.tools.geometry').candidate_context
             ep['initialization']['direction']=350
             geometry=context([200,300],ep,[300,300],90)
             self.assertEqual(geometry['bearing_from_initial_deg'],0)
@@ -96,9 +96,10 @@ class AgentTests(unittest.TestCase):
                 with self.assertRaises(ValueError):env.locate(v,[10,20,10,30])
                 env.close()
     def execute(self,d,actions,rounds=3):
+        # Historical direct-tool scenarios explicitly use their original two-call budget.
         m=self.modules(d);ep,env,out=self.fixture(d,m)
         model=ScriptModel(actions,m)
-        agent=m['engine'].Agent(ep,env,model,m['tools'].SAM3(),out,max_rounds=rounds)
+        agent=m['engine'].Agent(ep,env,model,m['tools'].SAM3(),out,max_rounds=rounds,max_tools=2)
         result=agent.run();trace=m['io'].load_json(out/'trace.json');env.close()
         return result,trace,model,m,ep,out
     def test_review_marker_preserves_frame_and_unmarked_rgb(self):
@@ -211,7 +212,7 @@ class AgentTests(unittest.TestCase):
     def test_grounder_dispatch_requires_review_and_replays_without_inference(self):
         for d in ('AVDN','CityNav'):
             m=self.modules(d);ep,env,out=self.fixture(d,m)
-            backend=importlib.import_module(d+'.tools.grounding')
+            backend=importlib.import_module(d+'.tools.grounding_skill')
             calls=[]
             def detect(payload):
                 calls.append(payload)
@@ -239,7 +240,7 @@ class AgentTests(unittest.TestCase):
     def test_grounder_invalid_cross_view_and_empty_are_distinct(self):
         for d in ('AVDN','CityNav'):
             m=self.modules(d);ep,env,out=self.fixture(d,m);v=env.main([200,200],0,'main')
-            backend=importlib.import_module(d+'.tools.grounding')
+            backend=importlib.import_module(d+'.tools.grounding_skill')
             responses=[dict(candidates=[]),dict(error='inference failed'),dict(candidates=[
                 dict(view_id='other',bbox_2d=[20,20,30,30])]),dict(candidates=[dict(bbox_2d=[20,20,float('nan'),30])])]
             statuses=[]
@@ -252,12 +253,12 @@ class AgentTests(unittest.TestCase):
     def test_observation_grounder_is_bounded_and_does_not_auto_confirm(self):
         for d in ('AVDN','CityNav'):
             m=self.modules(d);ep,env,out=self.fixture(d,m)
-            backend=importlib.import_module(d+'.tools.grounding')
+            backend=importlib.import_module(d+'.tools.grounding_skill')
             detector=backend.GroundingDINO(transport=lambda payload:dict(candidates=[
                 dict(view_id=payload['views'][0]['view_id'],bbox_2d=[200,200,400,400])]))
             model=ScriptModel([dict(action='give_up',reason='candidate lacks required relation')],m)
             result=m['engine'].Agent(ep,env,model,m['tools'].SAM3(),out,
-                grounders={'dino':detector},observation_grounder='dino').run()
+                grounders={'dino':detector},observation_grounder='dino',max_tools=2).run()
             self.assertIsNone(result['final']);self.assertEqual(model.cursor,1)
             self.assertEqual(model.contexts[0]['optional_tools_remaining'],1)
             self.assertEqual(model.contexts[0]['feedback'][0]['tool_result']['backend'],'dino')
@@ -276,7 +277,7 @@ class AgentTests(unittest.TestCase):
             model=ScriptModel([dict(action='give_up',reason='No supported identification')],m)
             tool=m['tools'].SAM3(transport=detect)
             result=m['engine'].Agent(ep,env,model,tool,out,
-                observation_grounder='sam3',observation_query_mode='category').run()
+                observation_grounder='sam3',observation_query_mode='category',max_tools=2).run()
             self.assertEqual(sent[0]['concepts'][0]['text'],'car')
             self.assertEqual(model.contexts[0]['initialization']['final_target'],ep['initialization']['final_target'])
             self.assertEqual(model.contexts[0]['optional_tools_remaining'],1)
@@ -470,7 +471,7 @@ class AgentTests(unittest.TestCase):
 
 
     def test_public_navigation_bearings_and_heading_up_views(self):
-        from CityNav.tools.context import navigation_context, heading_of_view
+        from CityNav.tools.geometry import navigation_context, heading_of_view
         m=self.modules('CityNav');ep,env,out=self.fixture('CityNav',m)
         ep['agent_input']['named_landmarks']=[dict(id='lm-fiction',name='library',type='Building',
             xy_m=[140.,280.],bbox_xy_m=[130,270,150,290])]
@@ -494,7 +495,7 @@ class AgentTests(unittest.TestCase):
         env.close()
 
     def test_public_extent_can_overlap_without_center_and_without_target(self):
-        from CityNav.tools.context import navigation_context
+        from CityNav.tools.geometry import navigation_context
         m=self.modules('CityNav');ep,env,out=self.fixture('CityNav',m)
         v=env.main([200,200],45,'main')
         landmarks=[dict(id='road',name='fictional road',type='TrafficRoad',
@@ -533,7 +534,7 @@ class AgentTests(unittest.TestCase):
 
 
     def test_reference_extent_probes_are_public_unobserved_positions(self):
-        from CityNav.tools.context import navigation_context
+        from CityNav.tools.geometry import navigation_context
         from shapely.geometry import Polygon, Point
         m=self.modules('CityNav');ep,env,out=self.fixture('CityNav',m)
         view=env.main([200,200],0,'main')
@@ -635,7 +636,7 @@ class AgentTests(unittest.TestCase):
         for ds in ('AVDN','CityNav'):
             with self.subTest(dataset=ds):
                 from importlib import import_module
-                frame=import_module(ds+'.tools.context').candidate_context
+                frame=import_module(ds+'.tools.geometry').candidate_context
                 ep={'agent_input':{'initial_pose':{'xy_m':[200,200],'heading_deg':90},'named_landmarks':[]},
                     'initialization':{'direction':345}}
                 a=frame([230,240],ep,[400,500],270)
@@ -661,12 +662,12 @@ class AgentTests(unittest.TestCase):
                         calls.append(payload)
                         if first_error and len(calls)==1:return {'error':'transient'}
                         return {'candidates':[]}
-                    detector=importlib.import_module(ds+'.tools.grounding').GroundingDINO(transport=detect)
+                    detector=importlib.import_module(ds+'.tools.grounding_skill').GroundingDINO(transport=detect)
                     script=[dict(action='locate',target='final',view_id='r00-main',bbox=[400,400,600,600],reason='check'),
                             dict(action='review',verdict='uncertain',reason='two alternatives'),
                             dict(action='give_up',reason='no discriminating evidence')]
                     model=ScriptModel(script,m)
-                    result=m['engine'].Agent(ep,env,model,m['tools'].SAM3(),out,grounders={'dino':detector},observation_grounder='dino').run()
+                    result=m['engine'].Agent(ep,env,model,m['tools'].SAM3(),out,grounders={'dino':detector},observation_grounder='dino',max_tools=2).run()
                     self.assertIsNone(result['final']);self.assertEqual(len(calls),2 if first_error else 1)
                     self.assertEqual(len([v for v in env.views.values() if v['source']=='main']),1)
                     trace=m['io'].load_json(out/'trace.json')
@@ -688,7 +689,7 @@ class AgentTests(unittest.TestCase):
 
                 detections=[]
                 def detect(payload):detections.append(payload);return {'candidates':[]}
-                detector=importlib.import_module(ds+'.tools.grounding').GroundingDINO(transport=detect)
+                detector=importlib.import_module(ds+'.tools.grounding_skill').GroundingDINO(transport=detect)
                 actions=[dict(action='locate',target='final',view_id='r00-main',bbox=[400,400,600,600],reason='candidate'),
                          dict(action='review',verdict='uncertain',reason='ambiguous'),
                          dict(action='give_up',reason='no new evidence')]
@@ -699,11 +700,11 @@ class AgentTests(unittest.TestCase):
                     if count[0]>2:raise mod.Halt('synthetic_interrupt')
                     return original(*args,**kwargs)
                 with patch.object(mod,'call_model',side_effect=respond) as api,patch.object(mod.Model,'request',new=stop_third):
-                    result=m['engine'].Agent(ep,env,mod.Model(out/'requests','qwen3.8-flash','test'),m['tools'].SAM3(),out,grounders={'dino':detector},observation_grounder='dino').run()
+                    result=m['engine'].Agent(ep,env,mod.Model(out/'requests','qwen3.8-flash','test'),m['tools'].SAM3(),out,grounders={'dino':detector},observation_grounder='dino',max_tools=2).run()
                     self.assertEqual(result['termination'],'synthetic_interrupt');self.assertEqual(api.call_count,2)
                 env.close();env=m['environment'].Environment(ep['environment'],out/'views')
                 with patch.object(mod,'call_model',side_effect=respond) as api:
-                    result=m['engine'].Agent(ep,env,mod.Model(out/'requests','qwen3.8-flash','test'),m['tools'].SAM3(),out,grounders={'dino':detector},observation_grounder='dino').run()
+                    result=m['engine'].Agent(ep,env,mod.Model(out/'requests','qwen3.8-flash','test'),m['tools'].SAM3(),out,grounders={'dino':detector},observation_grounder='dino',max_tools=2).run()
                     self.assertEqual(result['termination'],'give_up');self.assertEqual(api.call_count,1)
                 self.assertEqual(len(detections),1)
 

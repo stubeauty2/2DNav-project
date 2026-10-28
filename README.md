@@ -1,17 +1,20 @@
 # 2DNav-project
 
-## 当前在线 Agent（2026-10-23）
+## 当前在线 Agent（2026-10-27）
 
-当前工作目录对应 [第 06 阶段：harness 重构版](out/06_harness_refactor/README.md)，已从 Jev 复核实验回退至加入 Jev 之前；AVDN/CityNav 的 32 个 Python 文件与 `tests/refactor_online_compare/runtime_after` 一致。第 07 阶段已归档，第 08 阶段是尚未实现的 Jev 搜索证据工具设计。
+当前工作目录位于 `codex/jev-visual-evidence` 分支，基于第 06 阶段新增实验性的 Jev 搜索证据工具，默认关闭，原 MLLM 复核保持不变。`agent-avdn` 分支的 `569b1b1` 仍是加入 Jev 之前的版本。旧 Jev 复核方案属于第 07 阶段归档；证据工具初版属于 [第 08 阶段](out/08_jev_evidence_design/README.md)，当前四工具格式/提示迭代属于 [第 09 阶段](out/09_tool_iteration/README.md)。
 
-[01–08 实验输出总索引](out/README.md) · [当前代码身份与哈希](out/current_code_version.json) · [下一版设计](out/08_jev_evidence_design/jev_evidence_design_20261023/plan.md)
+[01–09 实验输出总索引](out/README.md) · [当前代码身份与哈希](out/current_code_version.json) · [原始设计计划](out/08_jev_evidence_design/jev_evidence_design_20261023/plan.md)
 
-本次代码快照包含当前在线包、`tests/nav_offline` 离线工具及配套回归测试。`out/`、数据集、权重和服务环境仅保存在本地；上面的实验报告链接需要本地归档。入口测试中的两项历史一致性检查还依赖 `out/agent_refactor_20261021/before_refactor.zip`。
+[视觉问题诊断与小样本导航报告](out/08_jev_evidence_design/index.html)。现有对照尚不能证明 Jev 减轻了导航所需的视觉信息获取负担，不能仅以请求数减少判定改进。
+
+第 08 阶段[源码快照](out/08_jev_evidence_design/evidence_runtime_20261023.zip)包含当时在线包、证据工具实验脚本和入口测试；既有离线工具位于 `tests/nav_offline`。`out/`、数据集、权重和服务环境仅保存在本地；上面的实验报告链接需要本地归档。入口测试中的历史一致性检查还依赖 `out/agent_refactor_20261021/before_refactor.zip`。
 
 旧 Jev 复核代码保存在本地分支 `codex/jev-review-archive-20261023`（提交 `b100fa589b77a1298a7077b94f26f3e343552154`），完整源码压缩包为 `out/07_jev_review/jev_review_archive_20261023/jev_review_code.zip`。恢复旧版时使用独立工作目录，避免覆盖当前版本。
 
-AVDN 和 CityNav 各自使用 `run.py → analysis.py → loop.py`；全部系统提示位于各自 `prompts.py`，执行能力位于 `tools/`。
+AVDN 和 CityNav 各自使用 run.py → analysis.py → loop.py；导航、复核和可选工具协议提示位于各自 prompts.py。tools/memory.py 统一保存记忆并构建当前 context；geometry.py 负责候选与地标几何，grounding_tools.py 提供独立检测客户端，grounding_skill.py 负责可选后端融合。默认 adaptive 模式独立暴露工具和 skill；主决策为 3.5，可选 visual_question 使用单独大模型补充视觉证据。旧 skill 模式仍限定 DINO + SAM3，LocateAnything 在 adaptive/direct 中可用。原 context.py、grounding.py、tool_protocol.py、agent_memory.py 已移除，两个数据集仍可独立冻结。
 
+- [独立工具、grounding skill 与新抽样对照](tests/adaptive_agent/README.md)
 - [AVDN 入口与输入说明](AVDN/README.md)
 - [CityNav 入口与输入说明](CityNav/README.md)
 - [离线准备与评测](tests/nav_offline/README.md)

@@ -1,12 +1,11 @@
-"""Grounding service protocol: proposals are evidence, never navigation decisions."""
-import json
-import re
-import math
-import shutil
+"""Independent category/referring-expression HTTP grounding tools."""
 import hashlib
+import json
+import math
+import re
+import shutil
 from pathlib import Path
 import requests
-
 
 class Grounder:
     backend='unknown'
@@ -71,7 +70,6 @@ class Grounder:
         output.write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
         return result
 
-
 def observation_query(target, mode='full'):
     """Optional category-only proposal query; selection still uses the full instruction."""
     if mode == 'full':
@@ -81,17 +79,12 @@ def observation_query(target, mode='full'):
     match = re.search(r'\b(parking lot|parking area|warehouse|building|house|car|van|bus|field|court|tree|roof|road|bridge|pond|lake|pool)\b', target, re.I)
     return match.group().lower() if match else target
 
-
-
 class SAM3(Grounder):
     backend="sam3"
-
-
 
 class GroundingDINO(Grounder):
     backend='dino'
 
-
-
 class LocateAnything(Grounder):
     backend='locate_anything'
+

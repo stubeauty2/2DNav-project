@@ -8,6 +8,11 @@ datasets/
 tests/
 tmp/
 
+# Keep the adaptive agent's reproducible regression and paired-sample runner.
+!/tests/
+/tests/*
+!/tests/adaptive_agent/
+
 # Keep regression checks for both navigation implementations.
 # !/tests/
 # /tests/*

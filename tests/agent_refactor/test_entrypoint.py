@@ -104,17 +104,41 @@ class EntryTests(unittest.TestCase):
                 tree=ast.parse(original(d,relative))
                 tree.body=[n for n in tree.body if not isinstance(n,(ast.Import,ast.ImportFrom))]
                 exec(compile(tree,relative,'exec'),namespace)
-            self.assertEqual(namespace['SYSTEM'],p.SYSTEM)
-            self.assertEqual(namespace['REVIEW_SYSTEM'],p.REVIEW_SYSTEM)
+            # Tool budgets are now configurable; preserve the remaining original
+            # navigation rules; CityNav has the explicit authorized policy below.
+            expected=namespace['SYSTEM'].replace('At most two optional calls per round.',
+                                                'Respect optional_tools_remaining for this round.')
+            expected_review=namespace['REVIEW_SYSTEM']
+            if d=='CityNav':
+                # Explicitly allow only the authorized landmark-first policy and
+                # its two conflicting historical sentences; retain full equality
+                # for all other navigation/review text and for the whole AVDN prompt.
+                for old,new in (
+                    ('DECISION: inspect the current RGB for plausible final targets before moving away.',
+                     'DECISION: first apply the mandatory CityNav landmark-first order below. In the\n'
+                     'relevant search region, inspect current RGB for plausible final targets before moving away.'),
+                    ('- No supported candidate is visible: explore offset turn_deg=15, step_scale=0.7,\n'
+                     '  inspect the new view, and update the prior. No fixed stage order is required.',
+                     '- No reliable named reference is available and no supported candidate is visible:\n'
+                     '  select a justified valid observation, inspect it, and update the exploration prior.\n'
+                     '  Do not repeat an arbitrary turn/step instead of approaching a required landmark.')
+                ):
+                    self.assertEqual(expected.count(old),1)
+                    expected=expected.replace(old,new,1)
+                expected += p.LANDMARK_FIRST_POLICY
+                expected_review += p.LANDMARK_REVIEW_POLICY
+            self.assertEqual(expected,p.SYSTEM)
+            self.assertEqual(expected_review,p.REVIEW_SYSTEM)
             for mode in (('direct','staged') if d=='AVDN' else (None,)):
                 self.assertEqual(namespace['system_prompt'](mode) if mode else namespace['system_prompt'](),
                                  p.initialization_prompt(mode) if mode else p.initialization_prompt())
 
-    def test_loop_and_view_algorithms_unchanged(self):
+    def test_view_algorithms_unchanged(self):
+        # The optional evidence tool extends Agent and validate_action. Its
+        # disabled-mode replay and baseline review plus the CityNav policy are checked in
+        # tests/jev_evidence/test_evidence.py against published commit 569b1b1.
         for d in ('AVDN','CityNav'):
-            for old,new,kind,name in [('navigation.py','loop.py',ast.ClassDef,'Agent'),
-                                      ('tools/views.py','tools/views.py',ast.ClassDef,'Environment'),
-                                      ('agent/contracts.py','loop.py',ast.FunctionDef,'validate_action')]:
+            for old,new,kind,name in [('tools/views.py','tools/views.py',ast.ClassDef,'Environment')]:
                 before=next(n for n in ast.parse(original(d,old)).body if isinstance(n,kind) and n.name==name)
                 after=next(n for n in ast.parse((ROOT/d/new).read_text(encoding='utf-8')).body if isinstance(n,kind) and n.name==name)
                 self.assertEqual(ast.dump(before),ast.dump(after),d+' '+name)
