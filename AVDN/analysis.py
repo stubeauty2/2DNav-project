@@ -198,12 +198,12 @@ def model_messages(agent, direction_mode='staged'):
     return messages, safe
 
 def analyze(agent, directory, key, *, model, url, direction_mode='staged',
-            protocol='auto', thinking_budget=0, max_tokens=2048, timeout=180):
+            protocol='auto', thinking_budget=0, max_tokens=2048, timeout=180, max_attempts=8):
     """Analyze one public initial observation; never read annotations or GT.
 
     Requests are journalled before sending. An interrupted pending request is
-    never automatically repeated. One invalid-format repair is allowed, using a
-    distinct request record. Existing compatible requests are replayed.
+    never automatically repeated. Invalid outputs receive up to seven repairs, each
+    in a distinct request record. Existing compatible requests are replayed.
     """
     from jsonschema.exceptions import ValidationError
     from .tools.model import call_model, Halt
@@ -216,7 +216,11 @@ def analyze(agent, directory, key, *, model, url, direction_mode='staged',
     messages, safe = model_messages(agent, direction_mode) if DATASET == 'AVDN' else model_messages(agent)
     parameters = dict(enable_thinking=thinking_budget > 0, thinking_budget=thinking_budget,
                       max_tokens=max_tokens)
-    for attempt in range(2):
+    if type(max_attempts) is not int or not 2 <= max_attempts <= 16:
+        raise ValueError('max_attempts must be an integer from 2 to 16')
+    for attempt in range(max_attempts):
+        if attempt >= 2:
+            parameters = dict(parameters, enable_thinking=False, thinking_budget=0, temperature=0)
         signature = digest(dict(messages=messages, model=model, endpoint=url, protocol=protocol,
                                 parameters=parameters))
         path = directory/f'{attempt:03d}.json'
@@ -250,9 +254,18 @@ def analyze(agent, directory, key, *, model, url, direction_mode='staged',
             save_json(directory/'result.json', result)
             return labels
         except (ValueError, KeyError, TypeError, ValidationError) as exc:
-            if attempt == 1:
-                raise Halt('analysis_invalid_format') from exc
             reason = str(exc).split('\n')[0][:500]
+            save_json(directory/f'validation-{attempt:03d}.json',
+                      dict(status='invalid', error_type=type(exc).__name__, error=reason))
+            if attempt == max_attempts-1:
+                raise Halt('analysis_repair_exhausted') from exc
             messages += [dict(role='assistant',content=raw),
                          dict(role='user',content=ANALYSIS_REPAIR.format(error=reason))]
+            if attempt >= 1:
+                messages[-1]['content'] += (
+                    '\nCheck JSON syntax before returning: close every array with ] and every object with }. '
+                    'Use double-quoted keys and strings. Preserve the destination and supported route; '
+                    'do not drop content or invent a direction just to pass validation. '
+                    'Return the complete corrected plan and answer in the original required format, '
+                    'not a patch or a statement that the error was fixed.')
     raise AssertionError('unreachable')

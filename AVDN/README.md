@@ -106,6 +106,9 @@ initialization   可选：direction / final_target / auxiliary
 如果 initialization 存在则验证后复用；缺省或 null 时调用 analysis。
 如要重新分析已有样本，请在新输入中移除 initialization，使用新的输出根目录。
 初始化优先使用输入 views；为空时按公开环境标定裁出初始观察，不读 GT。
+初始化格式错误最多进行 7 次修复（含首次共 8 次请求），完整校验通过才进入导航。
+前两次保持原调用配置，之后修复关闭思考并使用零温度；所有原始输出与错误均保留。
+耗尽修复或存在未确定是否完成的请求时返回 Halt，由批次运行器暂停处理，不伪造初始化。
 
 输出到 `--root/avdn/`：`run_manifest.json`、`source/`、公开输入副本，以及
 `episodes/<id>/analysis/`、`requests/`、`views/`、`tools/`、`trace.json`、`result.json`。
