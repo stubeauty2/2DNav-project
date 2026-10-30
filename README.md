@@ -12,7 +12,7 @@
 
 旧 Jev 复核代码保存在本地分支 `codex/jev-review-archive-20261023`（提交 `b100fa589b77a1298a7077b94f26f3e343552154`），完整源码压缩包为 `out/07_jev_review/jev_review_archive_20261023/jev_review_code.zip`。恢复旧版时使用独立工作目录，避免覆盖当前版本。
 
-AVDN 和 CityNav 各自使用 run.py → analysis.py → loop.py；导航、复核和可选工具协议提示位于各自 prompts.py。tools/memory.py 统一保存记忆并构建当前 context；geometry.py 负责候选与地标几何，grounding_tools.py 提供独立检测客户端，grounding_skill.py 负责可选后端融合。默认 adaptive 模式独立暴露工具和 skill；主决策为 3.5，可选 visual_question 使用单独大模型补充视觉证据。旧 skill 模式仍限定 DINO + SAM3，LocateAnything 在 adaptive/direct 中可用。原 context.py、grounding.py、tool_protocol.py、agent_memory.py 已移除，两个数据集仍可独立冻结。
+AVDN 和 CityNav 各自使用 run.py → analysis.py → loop.py；导航、复核和可选工具协议提示位于各自 prompts.py。tools/memory.py 统一保存记忆并构建当前 context；geometry.py 负责候选与地标几何，grounding_tools.py 提供独立检测客户端，grounding_skill.py 负责可选后端融合。默认 adaptive 模式独立暴露工具和 skill；主决策为 3.5，adaptive 默认启用 visual_question，使用独立的 qwen3.8-flash 补充视觉证据（--no-visual-model 可关闭）。旧 skill 模式仍限定 DINO + SAM3，LocateAnything 在 adaptive/direct 中可用。原 context.py、grounding.py、tool_protocol.py、agent_memory.py 已移除，两个数据集仍可独立冻结。
 
 - [独立工具、grounding skill 与新抽样对照](tests/adaptive_agent/README.md)
 - [AVDN 入口与输入说明](AVDN/README.md)

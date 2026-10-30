@@ -113,7 +113,7 @@ def model_context(value):
             # artifacts; the unmodified service response remains in the tool journal.
             value={k:v for k,v in value.items() if k in (
                 'backend','status','candidates','error','note','rejected_candidates','query','view_id',
-                'sources','unresolved','unassessed_sources','attribution_issues','fusion_requests','skill_version','evidence_id','cache_hit')}
+                'sources','source_regions_note','unresolved','unassessed_sources','attribution_issues','fusion_requests','skill_version','evidence_id','cache_hit')}
         return {k:model_context(v) for k,v in value.items()
                 if k not in ('bbox_pixels','pixel_to_world','world_to_raster','mask_path')}
     if isinstance(value,list):return [model_context(v) for v in value]

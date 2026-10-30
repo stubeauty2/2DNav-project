@@ -31,9 +31,13 @@ tools/
 zoom、Jev；`action:skill, skill:grounding` 选择后端并融合类别候选。后端可按实例选择，
 也可由 `--skill-backends` 配置默认组合。未配置或不健康的服务不会列为可用工具。
 
-`--visual-model qwen3.8-flash` 可启用独立的 `visual_question` 证据工具；还可填服务支持的
-其他多模态模型 ID。只有问答角色使用该模型，主决策、融合和 review 仍用 `--model`。
+adaptive 模式默认启用 `qwen3.8-flash` 作为独立的 `visual_question` 证据工具；
+用 `--visual-model` 指定其他可用模型，或 `--no-visual-model` 关闭。只有问答角色使用该模型，主决策、融合和 review 仍用 `--model`。
 工具回答包含观察、矛盾和不可见信息，不确认最终目标。所有模型调用共享请求预算。
+问答接收原始指令、原始姿态及该视图的区域几何，避免把图像上下误当成指令方向；
+黑边覆盖与不可见部分单独标注。可恢复的部分回答保留有效证据并标记缺项，
+错误视图或越界框仍拒绝。融合结果保留原始检测框，供比较部件与整体范围。
+初始化仍使用本分支原有解析和提示词，没有引入 RSI 或统一初始化策略。
 
 先看原图，按需要调用原始 grounding 或 skill 获得候选，再针对实例中的外观、数量、形状、
 关系或序数歧义选择 Jev、zoom 或视觉问答，最后 locate 或 explore。Jev 色彩问题绑定对象

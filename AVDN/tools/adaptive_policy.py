@@ -47,6 +47,12 @@ CHOOSE EVIDENCE FOR THE ACTUAL AMBIGUITY:
   instances. regions=[] supports a whole-view question. It can return RGB proposal
   boxes, never a final verdict. You still choose locate/explore. Avoid leading
   confirmation questions or guessing hidden street names from appearance.
+  For an uncertain Jev answer, a broad fused box, or disagreement between sources,
+  ask for the specific visible difference needed to resolve it, including plausible
+  alternatives. Check contradictions and unobservable details before locate; more
+  tool answers or agreement alone do not establish the target identity.
+  Original detector source_regions can preserve a wing lost inside a fused complex.
+  Compare the requested part or whole against RGB instead of blindly using the fused box.
 
 RECOVERY: read latest_review and latest_feedback first. After reject/uncertain,
 address its SPECIFIC contradiction with new evidence. If visual_question is

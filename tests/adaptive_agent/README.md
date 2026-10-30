@@ -1,7 +1,10 @@
 # Adaptive evidence loop
 
 The online packages default to `adaptive` mode and `qwen3.5-flash`. Raw tools and
-the grounding skill are independently callable. Existing `skill` and `direct`
+the grounding skill are independently callable. Adaptive entry points now enable
+`qwen3.8-flash` visual questions by default; `--no-visual-model` (or Python
+`visual_model=None`) disables them. Only evidence questions use 3.8; initialization,
+decision, fusion and review keep their existing models. Existing `skill` and `direct`
 modes remain available for historical comparisons.
 
 ```powershell

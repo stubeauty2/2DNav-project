@@ -81,11 +81,20 @@ def candidate_context(center, episode, position, heading):
     current_distance = math.dist(position, center)
     initial_bearing = bearing(start, center) if initial_distance > 1e-8 else None
     current_bearing = bearing(position, center) if current_distance > 1e-8 else None
+    original_turn = clock = None
+    if initial_bearing is not None and original_heading is not None:
+        relative = (initial_bearing-original_heading)%360
+        original_turn = round((relative+180)%360-180, 2)
+        if original_turn==180:original_turn=-180.
+        minutes = int(math.floor(relative*2+.5))%720
+        clock = f'{minutes//60 or 12}:{minutes%60:02d}'
     return dict(
         source='Candidate projection, public initial pose and executed pose only',
         distance_from_initial_m=round(initial_distance, 2),
         initial_forward_m=forward, initial_right_m=right,
         bearing_from_initial_deg=round(initial_bearing, 2) if initial_bearing is not None else None,
+        turn_from_initial_heading_deg=original_turn,
+        clock_from_initial_pose=clock,
         turn_from_initial_prior_deg=round((initial_bearing-prior+180)%360-180, 2)
             if initial_bearing is not None and prior is not None else None,
         distance_from_current_m=round(current_distance, 2),

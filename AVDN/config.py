@@ -1,6 +1,7 @@
 """Public runtime defaults. Credentials are read only from process environment."""
 import os
 MODEL = 'qwen3.5-flash'
+VISUAL_MODEL = 'qwen3.8-flash'  # Evidence tool only; never initialization, decision or review.
 ENABLE_THINKING = False
 MAX_ROUNDS = 12
 MAX_TOOLS_PER_ROUND = 4

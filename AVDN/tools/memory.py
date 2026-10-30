@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from .runtime import digest, runtime_hash
 from .grounding_skill import GroundingSkill, category_query, CATEGORIES, proposal_overlay
-from .visual_evidence import VisualEvidence
+from .visual_evidence import VisualEvidence, region_visibility, reference_context
 
 
 def observation_key(view):
@@ -14,11 +14,25 @@ def observation_key(view):
                        orientation=view.get('image_up_heading_deg')))
 
 def evidence_summary(result):
-    """Keep fused evidence; detailed per-backend boxes stay in the fusion journal."""
+    """Keep fusion judgments and their original source extents inspectable."""
     out = copy.deepcopy(result)
     if 'sources' in out:
+        known = {c['source_id']: c for s in out['sources'] for c in s.get('candidates', [])
+                 if 'source_id' in c}
+        judgments=out.get('candidates', [])+out.get('rejected_candidates', [])
+        for judgment in judgments if known else []:
+            # A kept fusion can merge a wing into a whole complex. Preserve its
+            # source extents just as for a rejection, without changing disposition.
+            judgment['source_regions'] = [
+                {k: copy.deepcopy(known[sid][k]) for k in ('source_id', 'view_id', 'bbox') if k in known[sid]}
+                for sid in dict.fromkeys(judgment.get('source_ids', [])) if sid in known]
+        if known and judgments:
+            out['source_regions_note']=('Original detector extents, not independent confirmation. '
+                'Fused and source regions may describe different parts or whole objects; '
+                'inspect RGB to choose the requested object extent. Rejected sources remain rejected opinions.')
         out['sources'] = [dict(backend=s['backend'], status=s['status'],
-                               candidate_count=len(s.get('candidates', []))) for s in out['sources']]
+                               candidate_count=len(s['candidates']) if 'candidates' in s else s.get('candidate_count', 0))
+                          for s in out['sources']]
     return out
 
 def build_history_context(memory, observation_id):
@@ -42,13 +56,16 @@ def tool_key(view, action, runtime_id):
 def presentation(context):
     """Copy and label facts without pruning, ranking, or inventing observations."""
     out = copy.deepcopy(context)
-    budget = out.get('optional_tools_remaining', 0)
+    # Advertise fresh evidence only when both enforced allowances permit it.
+    # Cache retrieval remains supported by execute_tool and adds no new evidence.
+    budget = min(out.get('optional_tools_remaining', 0),
+                 out.get('observation_tools_remaining', out.get('optional_tools_remaining', 0)))
     tools = list(out.get('available_grounding_tools', [])) + list(out.get('available_evidence_tools', []))
     if out.get('capabilities', {}).get('zoom'):
         tools.append('zoom')
     out['tools_callable_now'] = tools if budget > 0 else []
     out['skills_callable_now'] = list(out.get('available_skills', [])) if budget > 0 else []
-    out['allowed_next_actions'] = ['locate', 'explore', 'give_up'] + (['tool'] if budget > 0 else [])
+    out['allowed_next_actions'] = ['locate', 'explore', 'give_up'] + (['tool'] if out['tools_callable_now'] else [])
     if out['skills_callable_now']:out['allowed_next_actions'].append('skill')
     out['tool_result_contract'] = dict(coordinates='0..1000 xyxy in each result view_id',
         proposal_meaning='candidate region; identity unconfirmed',
@@ -83,6 +100,7 @@ def presentation_v2(context):
     current = dict(view_id=main.get('view_id'), image_up_heading_deg=main.get('image_up_heading_deg'),
         round=out.get('round'), rounds_remaining=out.get('rounds_remaining'),
         optional_tools_remaining=out.get('optional_tools_remaining'),
+        observation_tools_remaining=out.get('observation_tools_remaining'),
         tools_callable_now=out['tools_callable_now'], allowed_next_actions=out['allowed_next_actions'],
         recorded_visits_to_this_view=sum(v.get('view_id') == main.get('view_id') for v in visits),
         execution_errors=[{k: f[k] for k in ('error', 'rejected_action', 'invalid_response') if k in f}
@@ -351,7 +369,7 @@ class EvidenceCycle:
         if action['tool']=='visual_question':
             if self.grounding_mode!='adaptive' or not getattr(self.model,'visual_model',None):
                 raise ValueError('Visual evidence model is disabled')
-            for region in action['regions']:self.env.locate(view,region['bbox'])
+            region_visibility(view,action['regions'])
         if self.grounding_mode=='adaptive' and action['tool'] in ('dino','sam3','locate_anything'):
             if self.tool_status.get(action['tool'])!='available':
                 raise ValueError('Requested grounding tool is unavailable; choose a listed tool or skill')
@@ -401,7 +419,8 @@ class EvidenceCycle:
             result=self.inspect_visual(view,action['questions'],tool_index)
         elif action['tool']=='visual_question':
             result=self.visual_tool.inspect(view,action['question'],action['regions'],
-                self.output/'tools'/f'r{self.round:02d}-{tool_index}-visual.json')
+                self.output/'tools'/f'r{self.round:02d}-{tool_index}-visual.json',
+                public_reference=reference_context(view,action['regions'],self.episode))
             if result.get('proposals'):
                 from .geometry import candidate_context
                 for index,p in enumerate(result['proposals']):
