@@ -55,6 +55,7 @@ class Model:
     def request(self, context, views):
         if self.cursor>=self.max_requests:
             raise Halt('model_request_limit')
+        request_model = 'qwen3.5-flash' if context.get('mode') == 'decision' else self.model
         safe=model_context(dict(context,views=[safe_view(v) for v in views]))
         if context.get('mode')=='review':
             # Preserve full navigation memory in traces/decisions; review the current
@@ -63,7 +64,7 @@ class Model:
         system=REVIEW_SYSTEM if context.get('mode')=='review' else SYSTEM
         assets=[dict(view_id=v['view_id'],image_path=v['image_path'],
                      sha256=hashlib.sha256(Path(v['image_path']).read_bytes()).hexdigest()) for v in views]
-        signature=digest(dict(system=system,context=safe,assets=assets,model=self.model,
+        signature=digest(dict(system=system,context=safe,assets=assets,model=request_model,
             request_format='labelled-views-v6-json-object',temperature=0,
             enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,response_format={'type':'json_object'}))
         path=self.directory/f'{self.cursor:03d}.json'
@@ -95,12 +96,12 @@ class Model:
                 base64.b64encode(Path(view['image_path']).read_bytes()).decode())))
         messages=[dict(role='system',content=system),dict(role='user',content=content)]
         try:
-            reservation=self.budget.reserve(self.model,messages,self.reserved_output_tokens)
+            reservation=self.budget.reserve(request_model,messages,self.reserved_output_tokens)
         except BudgetExceeded as exc:
             self.cursor-=1
             reason = 'pricing_configuration_limit' if 'price' in str(exc).lower() else 'budget_limit'
             raise Halt(reason) from exc
-        record=dict(signature=signature,status='pending',reservation=reservation,model=self.model,
+        record=dict(signature=signature,status='pending',reservation=reservation,model=request_model,
                     system_prompt=system,budget_path=str(self.budget.path.resolve()),
                     reservation_cny=self.budget.read()['reservations'][reservation]['cny'],
                     enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
@@ -109,7 +110,7 @@ class Model:
                     request_format='labelled-views-v6-json-object',context=safe,assets=assets)
         save_json(path,record)  # Crash here conservatively retains reservation; never auto reissue.
         try:
-            response=call_model(self.url,self.model,self.key,messages,timeout=90,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
+            response=call_model(self.url,request_model,self.key,messages,timeout=90,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
                 max_tokens=MAX_OUTPUT_TOKENS,temperature=0,response_format={'type':'json_object'})
             self.budget.settle(reservation,response.get('usage'))
             record.update(response=response,status='ok' if response['status']==200 else 'api_error')
