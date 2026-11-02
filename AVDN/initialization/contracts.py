@@ -2,11 +2,7 @@
 import json
 import math
 import re
-from .tools.geometry import initialization_bearing as bearing
-import base64
-import hashlib
-from pathlib import Path
-
+from .geometry import bearing
 
 def obj(properties):
     return dict(type='object', properties=properties, required=list(properties), additionalProperties=False)
@@ -57,8 +53,24 @@ def parse_blocks(raw):
         text = re.sub(r'<plan>\s*.*?\s*</plan>', '', text, count=1, flags=re.S).strip()
     return json.loads(answers[0] if answers else text), json.loads(plans[0]) if plans else None
 
+def resolve_direction(result, agent):
+    validate_result(result, agent)
+    return {'heading_deg':result['direction'], 'source':'model' if result['direction'] is not None else 'unresolved',
+            'resolved':result['direction'] is not None}
 
+def exploration_seed(result, agent, diagnostics=None):
+    if result is not None:
+        resolved = resolve_direction(result, agent)
+        if resolved['resolved']:
+            return dict(resolved,role='goal_prior')
+    stage_heading = (diagnostics or {}).get('first_stage_heading_deg')
+    heading = stage_heading if stage_heading is not None else agent['initial_pose']['heading_deg']
+    return {'heading_deg':heading, 'source':'first_route_stage' if stage_heading is not None else 'initial_heading_metadata',
+            'role':'exploration_only', 'resolved':heading is not None}
 
+def grounding_query(result):
+    # The complete locating description is already one string.
+    return result['final_target']
 
 LEGACY_PLAN_SCHEMA = obj({
     'stages': {'type':'array','maxItems':12,'items':obj({
@@ -179,80 +191,3 @@ def validate_agent_input(agent):
         if set(turn) != {'turn_id','role','text'}:
             raise ValueError('Turn metadata outside whitelist')
 
-
-DATASET = 'AVDN'
-def model_messages(agent, direction_mode='staged'):
-    from .prompts import initialization_prompt
-    if agent['dataset'] != DATASET:
-        raise ValueError(f'This entry point accepts {DATASET} inputs only')
-    validate_agent_input(agent)
-    safe = json.loads(json.dumps(agent))
-    images = []
-    for view in safe['views']:
-        p = Path(view.pop('image_path'))
-        view.pop('valid_mask_path', None)
-        view['asset_sha256'] = hashlib.sha256(p.read_bytes()).hexdigest()
-        images.append({'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,'+base64.b64encode(p.read_bytes()).decode()}})
-    messages = [{'role': 'system', 'content': initialization_prompt(direction_mode)},
-                {'role': 'user', 'content': [{'type': 'text', 'text': json.dumps(safe, ensure_ascii=False)}]+images}]
-    return messages, safe
-
-def analyze(agent, directory, key, *, model, url, direction_mode='staged',
-            protocol='auto', thinking_budget=0, max_tokens=2048, timeout=180):
-    """Analyze one public initial observation; never read annotations or GT.
-
-    Requests are journalled before sending. An interrupted pending request is
-    never automatically repeated. One invalid-format repair is allowed, using a
-    distinct request record. Existing compatible requests are replayed.
-    """
-    from jsonschema.exceptions import ValidationError
-    from .tools.model import call_model, Halt
-    from .tools.runtime import save_json, load_json, digest
-    from .prompts import ANALYSIS_REPAIR
-    directory = Path(directory)
-    directory.mkdir(parents=True, exist_ok=True)
-    if isinstance(thinking_budget, bool) or thinking_budget < 0:
-        raise ValueError('thinking_budget must be nonnegative')
-    messages, safe = model_messages(agent, direction_mode) if DATASET == 'AVDN' else model_messages(agent)
-    parameters = dict(enable_thinking=thinking_budget > 0, thinking_budget=thinking_budget,
-                      max_tokens=max_tokens)
-    for attempt in range(2):
-        signature = digest(dict(messages=messages, model=model, endpoint=url, protocol=protocol,
-                                parameters=parameters))
-        path = directory/f'{attempt:03d}.json'
-        if path.exists():
-            record = load_json(path)
-            if record['signature'] != signature:
-                raise Halt('analysis_resume_input_mismatch')
-            if record['status'] == 'pending':
-                raise Halt('analysis_uncertain_request_pending')
-        else:
-            record = dict(signature=signature, status='pending', model=model, endpoint=url,
-                          protocol=protocol, parameters=parameters, agent_input=safe,
-                          system_prompt=messages[0]['content'], attempt=attempt)
-            save_json(path, record)
-            try:
-                response = call_model(url, model, key, messages, timeout, protocol, **parameters)
-                record.update(response=response, status='ok' if response['status']==200 else 'api_error')
-            except Exception as exc:
-                record.update(status='api_error', error=type(exc).__name__)
-            save_json(path, record)
-        if record['status'] != 'ok':
-            raise Halt('analysis_api_error')
-        raw = record['response']['text']
-        try:
-            labels, diagnostics = parse_model_output(raw, agent,
-                require_plan=DATASET == 'AVDN' and direction_mode == 'staged')
-            result = dict(status='ok', parsed=labels, diagnostics=diagnostics,
-                          resolved_direction=dict(heading_deg=labels['direction'],
-                              source=diagnostics['direction_source']),
-                          request_count=attempt+1)
-            save_json(directory/'result.json', result)
-            return labels
-        except (ValueError, KeyError, TypeError, ValidationError) as exc:
-            if attempt == 1:
-                raise Halt('analysis_invalid_format') from exc
-            reason = str(exc).split('\n')[0][:500]
-            messages += [dict(role='assistant',content=raw),
-                         dict(role='user',content=ANALYSIS_REPAIR.format(error=reason))]
-    raise AssertionError('unreachable')

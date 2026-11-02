@@ -1,1 +1,1 @@
-"""AVDN online agent: run, analysis, loop, prompts and tools."""
+"""AVDN adapter, initialization prompt and preserved andn_core baseline."""

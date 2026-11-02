@@ -1,107 +1,23 @@
-"""Native DashScope SSE and compatible chat transport; never logs headers."""
-import json
-import time
-import requests
-from ..config import MODEL as DEFAULT_MODEL, API_URL as DEFAULT_URL
+"""Durable request journal + a round-wide budget. Secrets never enter traces."""
 import base64
 import hashlib
+import json
 from pathlib import Path
-from .runtime import save_json, load_json, digest
-from ..prompts import SYSTEM, REVIEW_SYSTEM
+from ..initialization.budget import RequestBudget, BudgetExceeded
+from ..initialization.client import call_model, DEFAULT_URL
+from ..agent.io import save_json, load_json, digest
+from ..agent.prompts import SYSTEM, REVIEW_SYSTEM
 from ..config import MAX_REQUESTS, MAX_OUTPUT_TOKENS, ENABLE_THINKING
-
-
-def native_messages(messages):
-    converted = []
-    for message in messages:
-        content = message['content']
-        if isinstance(content, str):
-            parts = [{'text': content}]
-        else:
-            parts = []
-            for item in content:
-                if item['type'] == 'text':
-                    parts.append({'text': item['text']})
-                elif item['type'] == 'image_url':
-                    parts.append({'image': item['image_url']['url']})
-        converted.append({'role': message['role'], 'content': parts})
-    return converted
-
-
-def extract_text(body):
-    choices = body.get('output', body).get('choices', [])
-    if not choices:
-        return ''
-    content = choices[0].get('message', {}).get('content', '')
-    if isinstance(content, str):
-        return content
-    # Native thinking fields are deliberately not persisted as output evidence.
-    return ''.join(part.get('text', '') for part in content)
-
-
-def consume_native(lines, deadline=None):
-    texts, usage = [], None
-    for line in lines:
-        if deadline is not None and time.monotonic() >= deadline:
-            raise requests.Timeout('Native SSE exceeded total response deadline')
-        if not line or not line.startswith('data:'):
-            continue
-        value = line[5:].strip()
-        if not value or value == '[DONE]':
-            continue
-        body = json.loads(value)
-        if body.get('code') and not body.get('output'):
-            raise ValueError('Native API error code: '+str(body['code']))
-        texts.append(extract_text(body))
-        if body.get('usage'):
-            usage = body['usage']
-    return ''.join(texts), usage
-
-
-def call_model(url, model, key, messages, timeout, protocol='auto', enable_thinking=True,
-               thinking_budget=50, max_tokens=4096, temperature=None, response_format=None):
-    deadline = time.monotonic() + timeout
-    native = protocol == 'native' or (protocol == 'auto' and '/multimodal-generation/' in url)
-    headers = {'Authorization': 'Bearer '+key, 'Content-Type': 'application/json'}
-    if native:
-        headers['X-DashScope-SSE'] = 'enable'
-        parameters = {'enable_thinking': enable_thinking, 'incremental_output': True,
-                      'max_tokens': max_tokens}
-        if enable_thinking:
-            parameters['thinking_budget'] = thinking_budget
-        if temperature is not None:
-            parameters['temperature'] = temperature
-        if response_format is not None:
-            parameters['response_format'] = response_format
-        payload = {'model': model, 'input': {'messages': native_messages(messages)},
-                   'parameters': parameters}
-    else:
-        payload = {'model': model, 'messages': messages, 'temperature': 0,
-                   'max_tokens': max_tokens, 'stream': False, 'enable_thinking': enable_thinking}
-        if enable_thinking:
-            payload['thinking_budget'] = thinking_budget
-        if response_format is not None:
-            payload['response_format'] = response_format
-    with requests.post(url, headers=headers, json=payload, timeout=(20,timeout), stream=native) as response:
-        if response.status_code != 200:
-            return {'status': response.status_code, 'text': None, 'usage': None}
-        if native and 'event-stream' in response.headers.get('Content-Type',''):
-            response.encoding = 'utf-8'
-            # Small chunks let heartbeat-only streams reach the deadline check.
-            text, usage = consume_native(response.iter_lines(chunk_size=1, decode_unicode=True), deadline)
-        else:
-            body = response.json()
-            if body.get('code') and not body.get('output'):
-                raise ValueError('Native API error code: '+str(body['code']))
-            text, usage = extract_text(body), body.get('usage')
-        if not text.strip():
-            raise ValueError('Model returned no final answer text')
-        return {'status': response.status_code, 'text': text, 'usage': usage}
-
-
 
 class Halt(RuntimeError):
     pass
+
+class AgentBudget(RequestBudget):
+    def reserve(self, model, messages, max_tokens):
+        # Parent reserves 1024/image; add 3072 conservative tokens for each 768 image.
+        count=sum(p.get('type')=='image_url' for m in messages if isinstance(m['content'],list) for p in m['content'])
+        enlarged=messages+[dict(role='system',content='x'*(3072*count))]
+        return super().reserve(model,enlarged,max_tokens)
 
 def model_context(value):
     # All model-facing image coordinates use [0,1000]. Keep internal pixel geometry
@@ -122,16 +38,17 @@ def safe_view(view):
     return model_context({k:v for k,v in view.items() if k not in ('image_path','valid_mask_path','unmarked_image_path')})
 
 class Model:
-    def __init__(self, directory, model, key, max_requests=MAX_REQUESTS, url=DEFAULT_URL,
+    def __init__(self, directory, budget, model, key, max_requests=MAX_REQUESTS, url=DEFAULT_URL,
                  enable_thinking=ENABLE_THINKING, thinking_budget=1024):
         self.directory=Path(directory)
         self.directory.mkdir(parents=True,exist_ok=True)
-        self.model,self.key,self.url=model,key,url
+        self.budget,self.model,self.key,self.url=budget,model,key,url
         self.max_requests=max_requests
         self.enable_thinking=bool(enable_thinking)
         if self.enable_thinking and (isinstance(thinking_budget,bool) or not isinstance(thinking_budget,int) or thinking_budget<=0):
             raise ValueError('thinking_budget must be a positive integer')
         self.thinking_budget=thinking_budget if self.enable_thinking else 0
+        self.reserved_output_tokens=MAX_OUTPUT_TOKENS+self.thinking_budget
         self.cursor=0
         self.successful_views=set()
 
@@ -146,7 +63,7 @@ class Model:
         system=REVIEW_SYSTEM if context.get('mode')=='review' else SYSTEM
         assets=[dict(view_id=v['view_id'],image_path=v['image_path'],
                      sha256=hashlib.sha256(Path(v['image_path']).read_bytes()).hexdigest()) for v in views]
-        signature=digest(dict(system=system,context=safe,assets=assets,model=self.model,endpoint=self.url,
+        signature=digest(dict(system=system,context=safe,assets=assets,model=self.model,
             request_format='labelled-views-v6-json-object',temperature=0,
             enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,response_format={'type':'json_object'}))
         path=self.directory/f'{self.cursor:03d}.json'
@@ -156,7 +73,7 @@ class Model:
             if record['signature']!=signature:
                 raise Halt('resume_input_mismatch')
             if record['status']=='pending':
-                raise Halt('uncertain_request_pending')
+                raise Halt('uncertain_request_pending_reservation')
             if record['status']=='ok':
                 self.successful_views.update(v['view_id'] for v in views)
             return record
@@ -177,19 +94,28 @@ class Model:
             content.append(dict(type='image_url',image_url=dict(url='data:image/png;base64,'+
                 base64.b64encode(Path(view['image_path']).read_bytes()).decode())))
         messages=[dict(role='system',content=system),dict(role='user',content=content)]
-        record=dict(signature=signature,status='pending',model=self.model,
-                    system_prompt=system,
+        try:
+            reservation=self.budget.reserve(self.model,messages,self.reserved_output_tokens)
+        except BudgetExceeded as exc:
+            self.cursor-=1
+            reason = 'pricing_configuration_limit' if 'price' in str(exc).lower() else 'budget_limit'
+            raise Halt(reason) from exc
+        record=dict(signature=signature,status='pending',reservation=reservation,model=self.model,
+                    system_prompt=system,budget_path=str(self.budget.path.resolve()),
+                    reservation_cny=self.budget.read()['reservations'][reservation]['cny'],
                     enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
-                    max_tokens=MAX_OUTPUT_TOKENS,temperature=0,
+                    reserved_output_tokens=self.reserved_output_tokens,max_tokens=MAX_OUTPUT_TOKENS,temperature=0,
                     response_format={'type':'json_object'},
                     request_format='labelled-views-v6-json-object',context=safe,assets=assets)
-        save_json(path,record)  # Persist before sending; never auto reissue an uncertain request.
+        save_json(path,record)  # Crash here conservatively retains reservation; never auto reissue.
         try:
             response=call_model(self.url,self.model,self.key,messages,timeout=90,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
                 max_tokens=MAX_OUTPUT_TOKENS,temperature=0,response_format={'type':'json_object'})
+            self.budget.settle(reservation,response.get('usage'))
             record.update(response=response,status='ok' if response['status']==200 else 'api_error')
         except Exception as exc:
-            # Preserve failures in the journal; do not automatically repeat uncertain calls.
+            # The provider may have processed a timed-out request. Charge its full upper bound.
+            self.budget.settle(reservation,None)
             record.update(status='api_error',error=type(exc).__name__)
         save_json(path,record)
         if record['status']=='ok':
@@ -206,3 +132,4 @@ def parse_action(text):
     if len(obj['reason'])>2000:
         raise ValueError('Keep reason concise')
     return obj
+
