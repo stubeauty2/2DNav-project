@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 from types import SimpleNamespace
 
@@ -36,11 +37,23 @@ def main():
         raise RuntimeError(f'{len(failed)} initialization failures require inspection; no samples replaced')
     public=[json.loads(s) for s in (OUT/'citynav/public_uninitialized.jsonl').read_text(encoding='utf-8').splitlines()]
     assert len(public)==500 and len(predictions)==500
-    for row in public:row['initialization']=predictions[row['episode_id']]['parsed']
-    (OUT/'citynav/episodes.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in public),encoding='utf-8')
+    from CityNav.initialization.compact import select_catalog
+    navigation_root=OUT/'navigation_compact_v1'
+    folder=navigation_root/'citynav'
+    folder.mkdir(parents=True,exist_ok=True)
+    catalog_audit=[]
+    for row in public:
+        row['initialization']=predictions[row['episode_id']]['parsed']
+        agent=row['agent_input'];original=agent['named_landmarks']
+        selected,method=select_catalog(agent['instruction_raw'],original)
+        agent['named_landmarks']=selected
+        catalog_audit.append(dict(episode_id=row['episode_id'],original_count=len(original),retained_count=len(selected),method=method))
+    (folder/'episodes.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in public),encoding='utf-8')
+    (folder/'catalog_audit.json').write_text(json.dumps(catalog_audit,indent=2),encoding='utf-8')
+    shutil.copyfile(OUT/'citynav/evaluator_only.jsonl',folder/'evaluator_only.jsonl')
     command=[sys.executable,'-u','-B',str(SOURCE/'tests/run_frozen_agent_batch.py'),
-        '--dataset','CityNav','--source',str(SOURCE),'--root',str(OUT),
-        '--budget',str(OUT/'navigation_budget.json'),'--model','qwen3.8-max',
+        '--dataset','CityNav','--source',str(SOURCE),'--root',str(navigation_root),
+        '--budget',str(navigation_root/'navigation_budget.json'),'--model','qwen3.8-max',
         '--thinking-budget','2048','--workers','4','--sam3-url','http://127.0.0.1:8765',
         '--dino-url','http://127.0.0.1:8766','--observation-grounder','sam3',
         '--observation-query-mode','category']
