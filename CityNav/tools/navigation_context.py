@@ -1,56 +1,9 @@
-"""Public arithmetic for comparing proposals; never ranks or confirms targets."""
+"""Public navigation arithmetic, not a planner or target-location estimator."""
 import math
-from .geometry import bearing
 import numpy as np
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from .geometry import bearing, normalized, project, box_points
-
-
-def candidate_context(center, episode, position, heading):
-    start = episode['agent_input']['initial_pose']['xy_m']
-    prior = episode['initialization']['direction']
-    original_heading = episode['agent_input']['initial_pose']['heading_deg']
-    forward = right = None
-    if original_heading is not None:
-        angle = math.radians(original_heading)
-        east, north = center[0]-start[0], center[1]-start[1]
-        forward = round(east*math.sin(angle)+north*math.cos(angle), 2)
-        right = round(east*math.cos(angle)-north*math.sin(angle), 2)
-    initial_distance = math.dist(start, center)
-    current_distance = math.dist(position, center)
-    initial_bearing = bearing(start, center) if initial_distance > 1e-8 else None
-    current_bearing = bearing(position, center) if current_distance > 1e-8 else None
-    result = dict(
-        source='Candidate projection, public initial pose and executed pose only',
-        distance_from_initial_m=round(initial_distance, 2),
-        initial_forward_m=forward, initial_right_m=right,
-        bearing_from_initial_deg=round(initial_bearing, 2) if initial_bearing is not None else None,
-        turn_from_initial_prior_deg=round((initial_bearing-prior+180)%360-180, 2)
-            if initial_bearing is not None and prior is not None else None,
-        distance_from_current_m=round(current_distance, 2),
-        turn_from_current_heading_deg=round((current_bearing-heading+180)%360-180, 2)
-            if current_bearing is not None else None,
-        note='initial_forward/right use the original pose heading, not the exploration prior. Signed geometry does not identify a road or target.')
-    groups = {}
-    for landmark in episode['agent_input']['named_landmarks']:
-        name = landmark['name']
-        distance = math.dist(center, landmark['xy_m'])
-        box = landmark.get('bbox_xy_m')
-        extent_distance = math.hypot(max(box[0]-center[0], center[0]-box[2], 0),
-                                     max(box[1]-center[1], center[1]-box[3], 0)) if box else None
-        ref = dict(landmark_id=landmark['id'], distance_to_center_m=round(distance, 2),
-                   distance_to_extent_m=round(extent_distance, 2) if extent_distance is not None else None)
-        groups.setdefault(name, []).append(ref)
-    result['public_reference_distances'] = [dict(name=name,
-        nearest_center=min(refs, key=lambda r:r['distance_to_center_m']),
-        nearest_extent=min((r for r in refs if r['distance_to_extent_m'] is not None),
-                           key=lambda r:r['distance_to_extent_m'], default=None))
-        for name, refs in sorted(groups.items())]
-    result['reference_note'] = ('Distances are from this candidate, not the agent. Extents are catalog bounding '
-        'rectangles, not exact building/road outlines. A zero extent distance is not identity confirmation.')
-    return result
-
 
 def heading_of_view(view):
     c=np.asarray(view['world_corners_xy_m'],dtype=float)
@@ -133,3 +86,4 @@ def navigation_context(landmarks, position, heading, current_view, observed_view
         current_main_view_id=current_view['view_id'],main_image_up_heading_deg=round(heading_of_view(current_view),2),
         map_corners_xy_m=corners,landmarks=refs,last_executed_moves=trajectory[-3:],
         note='Coverage and probes use only public reference extents and observed footprints. Probes are optional exploration positions, not detections or target predictions. No remote RGB or target coordinates are used.')
+

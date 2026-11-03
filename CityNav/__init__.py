@@ -1,1 +1,1 @@
-"""CityNav online agent: run, analysis, loop, prompts and tools."""
+"""CityNav adapter and initialization; upstream code is reference material."""

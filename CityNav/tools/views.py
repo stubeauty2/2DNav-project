@@ -72,11 +72,8 @@ class Environment:
 
     def main(self, position, heading, view_id):
         self.check_position(position)
-        corners=rect_corners(position,heading,self.spec['main_width_m'],self.spec['main_height_m'])
-        for existing in self.views.values():
-            if existing['source']=='main' and np.allclose(existing['world_corners_xy_m'],corners,rtol=0,atol=1e-9):
-                return existing  # Same immutable raster/pose is the same observation.
-        return self.render(corners,view_id,'main')
+        return self.render(rect_corners(position,heading,self.spec['main_width_m'],
+                                       self.spec['main_height_m']),view_id,'main')
 
     def view(self, ident, allowed):
         if ident not in allowed or ident not in self.views:
@@ -149,22 +146,23 @@ class Environment:
     def tool_overlay(self, view, candidates, view_id):
         from PIL import ImageDraw
         with Image.open(view['image_path']) as source:
-            image=source.convert('RGB')
-        for c in candidates:
+            image=source.convert('RGBA')
+        colors=[(255,60,60),(30,220,90),(70,140,255),(255,200,0)]
+        for i,c in enumerate(candidates):
             self.locate(view,c['bbox'])
+            color=colors[i%len(colors)]
             if c.get('mask_path'):
                 with Image.open(c['mask_path']) as mask:
                     if mask.size!=image.size:raise ValueError('SAM3 mask dimensions differ from source view')
-                # Keep the service mask as an artifact, but never tint roof/wall
-                # interiors in a model input used to judge object appearance.
+                    alpha=mask.convert('L').point(lambda v:80 if v else 0)
+                    layer=Image.new('RGBA',image.size,(*color,0));layer.putalpha(alpha)
+                    image=Image.alpha_composite(image,layer)
             draw=ImageDraw.Draw(image)
             box=[v*767/1000 for v in c['bbox']]
-            draw.rectangle(box,outline='black',width=3)
-            draw.rectangle(box,outline='white',width=1)
-            draw.text((box[0]+3,box[1]+3),str(c['candidate_id']),fill='white',stroke_width=1,stroke_fill='black')
+            draw.rectangle(box,outline=(*color,255),width=2)
+            draw.text((box[0],box[1]),str(c['candidate_id']),fill=(*color,255))
         path=self.output/(view_id+'.png');image.convert('RGB').save(path)
-        overlay=dict(view,view_id=view_id,image_path=str(path.resolve()),source='grounding_overlay',parent_id=view['view_id'],
-            annotation='Monochrome candidate outlines and IDs only; object interiors are not color-filled. These are unconfirmed proposals.')
+        overlay=dict(view,view_id=view_id,image_path=str(path.resolve()),source='grounding_overlay',parent_id=view['view_id'])
         self.views[view_id]=overlay
         return overlay
 

@@ -1,7 +1,7 @@
 """East/north geometry; normalized image coordinates always refer to a view."""
 import math
 import numpy as np
-
+from ..initialization.views import homography
 
 def project(matrix, points):
     p = np.c_[np.asarray(points, dtype=float), np.ones(len(points))] @ np.asarray(matrix).T
@@ -50,16 +50,3 @@ def square_bbox(box, side=768):
     half = min(half,cx,side-1-cx,cy,side-1-cy)
     return box_points([cx-half,cy-half,cx+half,cy+half])
 
-
-def homography(src, dst):
-    a, b = [], []
-    for (x, y), (u, v) in zip(src, dst):
-        a.extend([[x, y, 1, 0, 0, 0, -u*x, -u*y], [0, 0, 0, x, y, 1, -v*x, -v*y]])
-        b.extend([u, v])
-    return np.r_[np.linalg.solve(a, b), 1].reshape(3, 3)
-
-def initialization_bearing(start, end):
-    dx, dy = end[0] - start[0], end[1] - start[1]
-    if math.hypot(dx, dy) < 1e-8:
-        return None
-    return math.degrees(math.atan2(dx, dy)) % 360

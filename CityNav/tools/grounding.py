@@ -7,7 +7,6 @@ import hashlib
 from pathlib import Path
 import requests
 
-
 class Grounder:
     backend='unknown'
     def __init__(self,url=None,transport=None):
@@ -80,18 +79,3 @@ def observation_query(target, mode='full'):
         raise ValueError('Unknown observation query mode')
     match = re.search(r'\b(parking lot|parking area|warehouse|building|house|car|van|bus|field|court|tree|roof|road|bridge|pond|lake|pool)\b', target, re.I)
     return match.group().lower() if match else target
-
-
-
-class SAM3(Grounder):
-    backend="sam3"
-
-
-
-class GroundingDINO(Grounder):
-    backend='dino'
-
-
-
-class LocateAnything(Grounder):
-    backend='locate_anything'
