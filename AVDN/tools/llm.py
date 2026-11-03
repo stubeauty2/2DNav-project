@@ -55,7 +55,7 @@ class Model:
     def request(self, context, views):
         if self.cursor>=self.max_requests:
             raise Halt('model_request_limit')
-        request_model = 'qwen3.5-flash' if context.get('mode') == 'decision' else self.model
+        request_model = 'qwen3.7-plus' if context.get('mode') == 'decision' else self.model
         safe=model_context(dict(context,views=[safe_view(v) for v in views]))
         if context.get('mode')=='review':
             # Preserve full navigation memory in traces/decisions; review the current

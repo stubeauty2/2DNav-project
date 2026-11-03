@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 
 PRICES = {
+    'qwen3.7-plus': {'input': 2.0, 'output': 8.0, 'max_input_tier': 256000,
+                      'url': 'https://www.qianwenai.com/models/qwen3.7-plus'},
     'qwen3.8-max': {'input': 12.0, 'output': 36.0, 'max_input_tier': 983000,
                     'url': 'https://www.qianwenai.com/models/qwen3.8-max'},
     'qwen3.5-plus': {'input': 0.8, 'output': 4.8, 'max_input_tier': 128000,
