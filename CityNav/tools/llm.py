@@ -132,7 +132,5 @@ def parse_action(text):
     obj=json.loads(text)
     if not isinstance(obj,dict) or not isinstance(obj.get('reason'),str) or not obj['reason'].strip():
         raise ValueError('Return one JSON action with a nonempty reason')
-    if len(obj['reason'])>2000:
-        raise ValueError('Keep reason concise')
     return obj
 

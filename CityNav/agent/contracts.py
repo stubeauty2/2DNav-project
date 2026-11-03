@@ -17,6 +17,15 @@ def number(value):
     return value
 
 def validate_action(a, review=False):
+    if not review and a.get('action')=='review':
+        raise ValueError('This is the DECISION stage. Submit locate with target final or auxiliary, view_id, bbox and reason to propose an object. Only the separate reviewer may return review/verdict.')
+    if not review and a.get('action') in ('tool','zoom','sam3','dino','locate_anything') and 'view_id' not in a:
+        raise ValueError('Missing view_id: every tool request must include the source image view_id from the displayed views, together with action, tool, query or bbox, and reason.')
+    if (not review and a.get('action')=='explore' and a.get('mode')=='offset'
+            and a.get('point') is None):
+        # Offset movement uses current pose; these optional empty/source labels
+        # cannot change the numeric turn or distance already supplied.
+        a={k:v for k,v in a.items() if k!='point' and not (k=='view_id' and isinstance(v,str))}
     # An explicit tool name as action is an unambiguous spelling alias. Never
     # infer missing coordinates, accept conflicting tools, or relax other fields.
     if not review and a.get('action') in ('zoom','sam3','dino','locate_anything'):

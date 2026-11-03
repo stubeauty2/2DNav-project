@@ -35,18 +35,14 @@ step_scale*main_view_height_m at current_heading+turn_deg; scale must be positiv
 Visible image points avoid compass arithmetic when repositioning. Invalid actions
 cause NO movement. Choose another valid point instead of repeating rejected values.
 
-REVIEW: both final and auxiliary proposals receive a mandatory local crop and their
-parent view. The thin yellow rectangle marks the CURRENT unconfirmed proposal; judge that object,
-not another object in the crop. This marker is not confirmation. In unmarked historical images,
-use the supplied current proposal coordinates. memory contains different rejected
-objects and must not replace inspecting these images. projection_in_review maps
-this unconfirmed proposal into the crop, not a second detection. Compare the candidate
-with alternatives and spatial evidence in the parent. Return only:
-{"action":"review","verdict":"confirm","view_id":"...","bbox":[100,200,300,400],"reason":"..."}
-{"action":"review","verdict":"reject","reason":"specific contradicting evidence"}
-{"action":"review","verdict":"uncertain","reason":"unresolved alternatives or missing evidence"}
-Confirm draws a refined box in a DISPLAYED image. A final box ends navigation without
-moving; an auxiliary box moves to its refined center. Reject/uncertain has no fallback.
+DECISION STAGE ONLY: return locate, tool, explore, or give_up. A locate action
+proposes a candidate; a separate reviewer subsequently confirms or rejects it.
+Never emit action review or a verdict in this decision stage, even when prior
+history contains reviewer outputs. Propose the desired final or auxiliary object
+with locate and its source view_id. Every tool action also requires a top-level
+view_id copied from a displayed image; a query alone is incomplete.
+Use a concise reason, preferably under 400 characters. State the decisive visible
+support or conflict; keep the JSON complete within the output allowance.
 
 Interpret attributes literally: color of a BUILDING may describe its walls; only
 an explicit roof-color phrase requires that roof color. Separate visible support,
