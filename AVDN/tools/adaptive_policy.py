@@ -13,6 +13,10 @@ reference even when its appearance is more distinctive. A tool answer about Y
 does not change the task into finding Y. Before locate, name the requested object
 or group in reason and explain how THIS box contains it, not just its reference.
 Recheck the original instruction if initialization and the visible scene disagree.
+Later colour or shape clarifications retain earlier distinguishing relations unless
+explicitly corrected. If a phrase could select one member of a group or an adjacent
+area, preserve both interpretations until the full dialogue and image resolve it.
+Historical arrival statements do not describe the current agent position.
 
 COORDINATES: every image has a view_id. Points/boxes use its [0,1000] x-right/y-down
 frame, never pixels. Never copy boxes between views. Moving changes view center,
@@ -22,8 +26,10 @@ orientation. Candidate initial_forward/right use the ORIGINAL pose heading.
 
 TOOLS AND SKILLS ARE INDEPENDENT. Call only listed available/callable names.
 Inspect RGB, then obtain a candidate map before final locate or leaving a plausible
-target region. Prefer the grounding skill to consolidate multiple backends; a raw
-tool is useful when one source suffices or you need to inspect a specific failure.
+target region. Start with one available raw grounder when it can provide the needed
+candidate map. Use the fusion skill when consolidation resolves a specific ambiguity;
+it adds model requests and may change useful source extents. Inspect existing raw
+candidates before paying for another map of the same category and view.
 Search the FINAL TARGET category first. Skill grounding sends the SAME CATEGORY to
 selected sources and fuses against RGB. Select a subset or omit backends for defaults.
 Raw sam3/dino and skill grounding require EXACTLY one grounding_categories value:
@@ -42,6 +48,10 @@ CHOOSE EVIDENCE FOR THE ACTUAL AMBIGUITY:
   presence and color on the same ROI if object presence is doubtful. Unknown or
   a diffuse uncalibrated distribution is unresolved, not a confident attribute.
 - Zoom: tiny details with enough surrounding context to retain the relation.
+  For shape disagreement inspect roof connections, courtyard openings and separate
+  wings in a local view. For counts inspect distinct complete instances. Compare
+  the same observable property across competing candidates, including less prominent
+  ones. A Jev class or colour probability cannot override clearly visible structure.
 - visual_question: competing candidates, relations, ordinals, or contradictory
   Jev/detector evidence. Ask about the conflicting region AND other plausible
   instances. regions=[] supports a whole-view question. It can return RGB proposal
@@ -53,6 +63,10 @@ CHOOSE EVIDENCE FOR THE ACTUAL AMBIGUITY:
   tool answers or agreement alone do not establish the target identity.
   Original detector source_regions can preserve a wing lost inside a fused complex.
   Compare the requested part or whole against RGB instead of blindly using the fused box.
+  Questions must preserve the original target definition. Supply image orientation
+  when asking geographic relations; image top is north only when the heading supports
+  that claim. Do not ask a tool for invisible heights or floor counts. A generic
+  attribute match leaves route identity unresolved when several objects share it.
 
 RECOVERY: read latest_review and latest_feedback first. After reject/uncertain,
 address its SPECIFIC contradiction with new evidence. If visual_question is
@@ -61,6 +75,13 @@ proposing that candidate again; otherwise use a different source or clearer view
 Do not shift a rejected box a few pixels and repeat. Cached calls add no evidence.
 Repair invalid descriptive queries to a listed category. Never repeat an unchanged
 rejected action. When a tool budget is exhausted, choose from the remaining actions.
+The tool_attempts index records earlier queries, errors and cache hits even when
+their full results are outside the recent evidence window. Rephrasing a previous
+answer adds no observation. After an invalid action, read latest_feedback and change
+the rejected parameters or select another allowed action. After a repeated locate
+is blocked for lacking new evidence, choose a different candidate, a genuinely new
+observation, exploration or give_up. Do not spend the remaining requests submitting
+the same box with a rewritten reason.
 
 IDENTITY: roof color is required only when the instruction explicitly describes
 the roof. Walls, doors, stairs or people can be unobservable overhead; neither invent

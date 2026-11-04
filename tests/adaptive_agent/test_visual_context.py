@@ -33,6 +33,12 @@ class VisualContextTests(unittest.TestCase):
                         self.assertNotIn('HIDDEN_TARGET_SENTINEL',json.dumps(messages))
                         if ctx['mode']=='visual_evidence':
                             self.assertEqual(name,'qwen3.8-flash');questions.append(ctx)
+                            if ds=='AVDN':
+                                self.assertEqual(len(ctx['region_details']),1)
+                                self.assertEqual(ctx['region_details'][0]['region_id'],'A')
+                                self.assertEqual(len(ctx['views']),2)
+                                self.assertEqual(ctx['source_view_id'],'r00-main')
+                                self.assertIn('ORIGINAL',ctx['detail_coordinate_note'])
                             self.assertEqual(ctx['question'],action['question'])
                             ref=ctx['public_reference']
                             self.assertEqual(ref['original_pose'],ep['agent_input']['initial_pose'])

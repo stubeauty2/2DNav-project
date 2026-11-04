@@ -1,6 +1,7 @@
 """Observation history, tool context presentation and evidence-cycle state."""
 import copy
 import hashlib
+import math
 import re
 from pathlib import Path
 from .runtime import digest, runtime_hash
@@ -139,7 +140,7 @@ def presentation_adaptive(context):
                 for k,v in r.items() if k in ('answer','candidate','refined','review_view_id','round','target','evidence_ids')}
     def loop(r):
         if not r:return r
-        item={k:copy.deepcopy(r[k]) for k in ('loop_id','view_id','start_position_xy_m','end_position_xy_m','tools','termination') if k in r}
+        item={k:copy.deepcopy(r[k]) for k in ('loop_id','view_id','start_position_xy_m','end_position_xy_m','end_heading_deg','tools','termination') if k in r}
         judgments=[a for a in r.get('judgments',[]) if a.get('action')!='review']
         item['last_judgment']=copy.deepcopy(judgments[-1]) if judgments else None
         outcome=r.get('outcome') or {}
@@ -179,12 +180,33 @@ def presentation_adaptive(context):
     if 'visual_evidence' in out:
         out['visual_evidence']=[a for a in out['visual_evidence'] if a.get('evidence_id') not in answer_ids]
     out.pop('current_request',None)
-    out.pop('tool_attempts',None)  # Current evidence + prior loop tool refs contain executed facts.
+    # The evidence window and recent loops do not cover every earlier attempt.
+    # Retain a compact index so an old error or cached call is not rediscovered.
+    attempts = {}
+    for item in out.get('tool_attempts', []):
+        signature = digest({k:v for k,v in item.items()
+                            if k not in ('event_index','round','cache_hit','evidence_id','candidate_count')})
+        previous = attempts.pop(signature, {})
+        attempts[signature] = dict(item, attempts=previous.get('attempts', 0)+1)
+    out['tool_attempts'] = list(attempts.values())
     out.pop('action_fields',None)  # The single adaptive system contract supplies exact schemas.
     out.pop('grounding_backends',None)  # Duplicates capabilities/available tools.
     if out.get('mode')=='decision' and out.get('jev_questions_remaining',1)<=0:
         out['tools_callable_now']=[t for t in out['tools_callable_now'] if t!='jev']
     if out.get('mode')=='decision':
+        current_view = next((v for v in out.get('views',[]) if v.get('source')=='main'), {})
+        orientation = current_view.get('image_up_heading_deg')
+        compass = {}
+        if isinstance(orientation,(int,float)) and math.isfinite(orientation):
+            for name,bearing in [('north',0),('east',90),('south',180),('west',270)]:
+                angle = math.radians(bearing-orientation)
+                compass[name] = [round(math.sin(angle),6),round(-math.cos(angle),6)]
+        out['current_request'] = dict(view_id=current_view.get('view_id'),
+            position_xy_m=copy.deepcopy(out.get('position_xy_m')),
+            heading_deg=out.get('heading_deg'), image_up_heading_deg=orientation,
+            compass_image_vectors=compass,
+            compass_note='Unit directions in this image, x right/y down. Historical and previous images retain their own frames.',
+            motion_note='Offset turns add to CURRENT heading_deg. Repeated 180-degree turns reverse the previous movement.')
         # Counts this decision, an evidence call, a subsequent decision and review.
         remaining=out.get('model_requests_remaining',48)
         out['tools_callable_now']=[t for t in out['tools_callable_now']
@@ -221,6 +243,8 @@ def attempt_index(events):
         item = dict(event_index=index, round=event['round'], tool=action.get('tool',action.get('skill')),
                     invocation=event['kind'],
                     view_id=action['view_id'], status=output.get('status'))
+        item['cache_hit'] = output.get('cache_hit', False)
+        if 'evidence_id' in output:item['evidence_id'] = output['evidence_id']
         for key in ('query', 'bbox', 'questions','question','regions','backends'):
             if key in action:
                 item[key] = copy.deepcopy(action[key])
@@ -418,9 +442,24 @@ class EvidenceCycle:
         elif action['tool']=='jev':
             result=self.inspect_visual(view,action['questions'],tool_index)
         elif action['tool']=='visual_question':
+            details=[]
+            for index,region in enumerate(action['regions']):
+                x1,y1,x2,y2=region['bbox']
+                # Whole-view context is already supplied; magnify only local ROIs.
+                if (x2-x1)*(y2-y1)>250000:
+                    continue
+                margin=.1*max(x2-x1,y2-y1)
+                box=[max(0,x1-margin),max(0,y1-margin),min(1000,x2+margin),min(1000,y2+margin)]
+                try:
+                    detail=self.env.zoom(view,box,f'r{self.round:02d}-visual{tool_index}-detail{index}')
+                except ValueError:
+                    # Partially padded ROIs remain valid visual questions even
+                    # when the geometry tool cannot produce an executable crop.
+                    continue
+                details.append(dict(detail,region_id=region['id'],source_bbox=box))
             result=self.visual_tool.inspect(view,action['question'],action['regions'],
                 self.output/'tools'/f'r{self.round:02d}-{tool_index}-visual.json',
-                public_reference=reference_context(view,action['regions'],self.episode))
+                public_reference=reference_context(view,action['regions'],self.episode),detail_views=details)
             if result.get('proposals'):
                 from .geometry import candidate_context
                 for index,p in enumerate(result['proposals']):

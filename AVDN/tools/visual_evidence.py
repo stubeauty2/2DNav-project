@@ -183,19 +183,28 @@ class VisualEvidence:
     def __init__(self, model):
         self.model=model
 
-    def inspect(self, view, question, regions, output, *, public_reference=None):
+    def inspect(self, view, question, regions, output, *, public_reference=None, detail_views=None):
         validate_request(question,regions)
         coverage=region_visibility(view,regions)
         context=dict(mode='visual_evidence',question=question,regions=regions,
                      region_visibility=coverage,
                      source_view_id=view['view_id'])
         if public_reference is not None:context['public_reference']=copy.deepcopy(public_reference)
-        record=self.model.request(context,[view])
+        details = detail_views or []
+        if details:
+            context['region_details'] = [dict(region_id=v['region_id'],view_id=v['view_id'],
+                source_bbox=v['source_bbox']) for v in details]
+            context['detail_coordinate_note'] = ('Additional images magnify the specified source regions. '
+                'Describe visible structure and conflicts separately for each region. '
+                'All returned proposals must use the ORIGINAL source_view_id 0..1000 frame; '
+                'never copy detail-image coordinates into the source frame.')
+        record=self.model.request(context,[view]+details)
         result=dict(backend='visual_question',status='error',view_id=view['view_id'],
                     question=question,regions=regions,model=record.get('model'),
                     region_visibility=coverage,
                     request_index=self.model.cursor-1,
                     note='Fallible RGB evidence, not confirmation. Missing evidence is not absence.')
+        if details:result['region_details']=context['region_details']
         if record['status']=='ok':
             try:
                 answer,notes,missing,unrequested=recover_answer(json.loads(record['response']['text']),regions,view['view_id'])
