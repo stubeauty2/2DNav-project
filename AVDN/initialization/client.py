@@ -55,7 +55,8 @@ def consume_native(lines, deadline=None):
 
 
 def call_model(url, model, key, messages, timeout, protocol='auto', enable_thinking=True,
-               thinking_budget=50, max_tokens=4096, temperature=None, response_format=None):
+               thinking_budget=50, max_tokens=4096, temperature=None, response_format=None,
+               connect_timeout=20):
     deadline = time.monotonic() + timeout
     native = protocol == 'native' or (protocol == 'auto' and '/multimodal-generation/' in url)
     headers = {'Authorization': 'Bearer '+key, 'Content-Type': 'application/json'}
@@ -78,7 +79,7 @@ def call_model(url, model, key, messages, timeout, protocol='auto', enable_think
             payload['thinking_budget'] = thinking_budget
         if response_format is not None:
             payload['response_format'] = response_format
-    with requests.post(url, headers=headers, json=payload, timeout=(20,timeout), stream=native) as response:
+    with requests.post(url, headers=headers, json=payload, timeout=(connect_timeout,timeout), stream=native) as response:
         if response.status_code != 200:
             return {'status': response.status_code, 'text': None, 'usage': None}
         if native and 'event-stream' in response.headers.get('Content-Type',''):

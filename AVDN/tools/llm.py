@@ -39,10 +39,12 @@ def safe_view(view):
 
 class Model:
     def __init__(self, directory, budget, model, key, max_requests=MAX_REQUESTS, url=DEFAULT_URL,
-                 enable_thinking=ENABLE_THINKING, thinking_budget=1024):
+                 enable_thinking=ENABLE_THINKING, thinking_budget=1024,
+                 decision_prompt=None, review_prompt=None, request_timeout=90, connect_timeout=20):
         self.directory=Path(directory)
         self.directory.mkdir(parents=True,exist_ok=True)
         self.budget,self.model,self.key,self.url=budget,model,key,url
+        self.request_timeout,self.connect_timeout=request_timeout,connect_timeout
         self.max_requests=max_requests
         self.enable_thinking=bool(enable_thinking)
         if self.enable_thinking and (isinstance(thinking_budget,bool) or not isinstance(thinking_budget,int) or thinking_budget<=0):
@@ -51,6 +53,8 @@ class Model:
         self.reserved_output_tokens=MAX_OUTPUT_TOKENS+self.thinking_budget
         self.cursor=0
         self.successful_views=set()
+        self.decision_prompt=SYSTEM if decision_prompt is None else decision_prompt
+        self.review_prompt=REVIEW_SYSTEM if review_prompt is None else review_prompt
 
     def request(self, context, views):
         if self.cursor>=self.max_requests:
@@ -61,7 +65,7 @@ class Model:
             # Preserve full navigation memory in traces/decisions; review the current
             # object without anchoring on earlier guesses about different candidates.
             safe['memory']={'confirmed_auxiliary':safe.get('memory',{}).get('confirmed_auxiliary',[])}
-        system=REVIEW_SYSTEM if context.get('mode')=='review' else SYSTEM
+        system=self.review_prompt if context.get('mode')=='review' else self.decision_prompt
         assets=[dict(view_id=v['view_id'],image_path=v['image_path'],
                      sha256=hashlib.sha256(Path(v['image_path']).read_bytes()).hexdigest()) for v in views]
         signature=digest(dict(system=system,context=safe,assets=assets,model=request_model,
@@ -110,7 +114,7 @@ class Model:
                     request_format='labelled-views-v6-json-object',context=safe,assets=assets)
         save_json(path,record)  # Crash here conservatively retains reservation; never auto reissue.
         try:
-            response=call_model(self.url,request_model,self.key,messages,timeout=90,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
+            response=call_model(self.url,request_model,self.key,messages,timeout=self.request_timeout,connect_timeout=self.connect_timeout,enable_thinking=self.enable_thinking,thinking_budget=self.thinking_budget,
                 max_tokens=MAX_OUTPUT_TOKENS,temperature=0,response_format={'type':'json_object'})
             self.budget.settle(reservation,response.get('usage'))
             record.update(response=response,status='ok' if response['status']==200 else 'api_error')

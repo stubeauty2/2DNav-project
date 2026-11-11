@@ -91,6 +91,22 @@ class Agent:
             view=self.env.views[view['parent_id']]
         return view
 
+    def observation_target(self):
+        return self.episode['initialization']['final_target']
+
+    def observation_cache_key(self, main):
+        return main['view_id']
+
+    def auxiliary_confirmed(self, refined, reason):
+        self.memory['confirmed_auxiliary'].append(dict(refined,reason=reason))
+        self.move(refined['center_xy_m'],bearing(self.position,refined['center_xy_m'],self.heading),'reviewed_auxiliary')
+
+    def final_confirmed(self, refined, reason, view):
+        self.final=dict(refined,reason=reason,
+            evaluation_polygon_xy_m=project(view['pixel_to_world'],square_bbox(refined['bbox_pixels'])))
+        self.termination='confirmed_final'
+        self.event('final_localization',localization=self.final,actual_move=False)
+
     def review(self, proposal, main, candidate):
         detail=self.env.review(candidate,main,f'r{self.round:02d}-review')
         detail=self.env.mark_review(detail,candidate)
@@ -118,13 +134,9 @@ class Agent:
                 continue
             self.event('review_result',answer=answer,candidate=candidate,refined=refined)
             if proposal['target']=='auxiliary':
-                self.memory['confirmed_auxiliary'].append(dict(refined,reason=answer['reason']))
-                self.move(refined['center_xy_m'],bearing(self.position,refined['center_xy_m'],self.heading),'reviewed_auxiliary')
+                self.auxiliary_confirmed(refined,answer['reason'])
             else:
-                self.final=dict(refined,reason=answer['reason'],
-                    evaluation_polygon_xy_m=project(view['pixel_to_world'],square_bbox(refined['bbox_pixels'])))
-                self.termination='confirmed_final'
-                self.event('final_localization',localization=self.final,actual_move=False)
+                self.final_confirmed(refined,answer['reason'],view)
             return
         raise Halt('invalid_review_limit')
 
@@ -162,7 +174,8 @@ class Agent:
                 # Optional experimental policy: inspect the current observation with a
                 # local grounder before deciding to leave it. Counts toward tool limit.
                 if self.observation_grounder and self.max_tools>0 and self.tool_status.get(self.observation_grounder)=='available':
-                    cached=self.observation_cache.get(main['view_id'])
+                    observation_key=self.observation_cache_key(main)
+                    cached=self.observation_cache.get(observation_key)
                     if cached is not None:
                         result,overlay=cached
                         if overlay:views=[main,overlay]
@@ -172,14 +185,14 @@ class Agent:
                     else:
                         tools=1
                         action=dict(action='tool',tool=self.observation_grounder,view_id=main['view_id'],
-                            query=observation_query(self.episode['initialization']['final_target'],self.observation_query_mode),
+                            query=observation_query(self.observation_target(),self.observation_query_mode),
                             reason='Observation proposal policy; full instruction retained for candidate selection')
                         result,overlay=self.ground(main,action['tool'],action['query'],tools)
                         if overlay:views=[main,overlay]
                         feedback.append(dict(tool_result=result))
                         self.event('tool',input=action,output=result,origin='observation_policy')
                         if result['status']=='ok':
-                            self.observation_cache[main['view_id']]=(result,overlay)
+                            self.observation_cache[observation_key]=(result,overlay)
                 while True:
                     action=self.ask('decision',views,tools,feedback=feedback)
                     self.remember(action);self.event('decision',action=action)
